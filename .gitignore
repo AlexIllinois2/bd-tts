@@ -1,0 +1,25 @@
+# Gradle / IDE
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+
+# prepare_vendor.py 生成的厂商原件（不外传、不入库）
+app/src/main/jniLibs/arm64-v8a/*.so
+app/src/main/assets/midu/*
+!app/src/main/assets/midu/additional_dict_path.sample.txt
+!app/src/main/assets/midu/README.md
+
+# 规则种子是纯文本，随工程入库；上游产物 / 用户文件不入库
+!app/src/main/assets/rules/vendor_unified_rule.txt
+local_rules/upstream_unified_rule.txt
+local_rules/upstream_rule_patch.txt
+local_rules/user_rules.txt.bak
+*.pcm
+*.log
+
+# 构建产物（APK 大件不入库，仅供本机自用）
+dist/
+*.apk

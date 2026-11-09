@@ -1,0 +1,24 @@
+pluginManagement {
+    repositories {
+        // 本机 maven.google.com 直连超时；阿里云 google/public 镜像可达（~0.2s）。
+        // 显式声明，避免依赖 ~/.gradle/init.d 的全局脚本也能构建。
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    // 全局 init 脚本 aliyun-prepend.init.gradle 会向 project 仓库注入镜像；
+    // FAIL_ON_PROJECT_REPOS 会与之冲突，改为以 settings 声明为准。
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "MiduTtsEngine"
+include ':app'

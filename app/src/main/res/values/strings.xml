@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Midu TTS 引擎</string>
+    <string name="legacy_settings_label">Midu TTS · 经典设置</string>
+    <string name="engine_label">Midu TTS（离线字节语音）</string>
+    <string name="sample_text">今天天气不错，我们一起去公园散步吧。银行的行长在人行道上行走了很久。</string>
+</resources>
