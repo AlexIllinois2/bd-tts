@@ -252,7 +252,9 @@ ABI、native.bridge、12 枚必需 .so 是否齐、资源/规则文件是否就�
 
 - vendor：`assets/rules/vendor_unified_rule.txt`（rig 原件种子，只读）
 - 上游：`RuleUpdateService` 每 6h 用 ETag 拉 `conf/unified_rule.txt`，
-  过合法性闸后原子落盘，保留 `.prev` 可回滚；URL/间隔/开关都能在设置页改
+  过合法性闸后原子落盘，保留 `.prev` 可回滚；URL/间隔/开关都能在设置页改。
+  源站（raw.githubusercontent.com）被网络重置时自动回退代理前缀镜像
+  （gh-proxy.com → ghproxy.net），详见 `docs/RULE_FORMAT.md` §4
 - 用户：「读音」页表单式添加/调整（写入 `新增:` 区块）/ 规则页整份编辑 / SAF 导入导出
 
 合并按「字词 + 条件」判同键，高层覆盖读音、保留位置与上游排序；

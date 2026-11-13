@@ -19,6 +19,8 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /** 定时检查 midu_unified_rule 的产物（ETag 增量），落盘后立即重算三层合并。 */
@@ -79,6 +81,26 @@ public class RuleUpdateService extends JobService {
         return BuildConfig.UPSTREAM_RULE_URL;
     }
 
+    /**
+     * raw.githubusercontent.com 在国内网络普遍被 TLS 重置（真机实测：curl 35 / 0.2s RST）。
+     * 未设置自定义 URL 时按「源站 → 代理前缀镜像」顺序回退；代理镜像为
+     * 前缀拼接原 URL 的通用形态，镜像失效只需改这张表。
+     * 用户自定义 URL 是显式选择，不做镜像拼接，失败原样报错。
+     */
+    private static final String[] MIRROR_PREFIXES = {
+            "https://gh-proxy.com/",
+            "https://ghproxy.net/",
+    };
+
+    private static List<String> candidates(Prefs p) {
+        List<String> out = new ArrayList<>();
+        String custom = p.ruleUrl();
+        if (!custom.isEmpty()) { out.add(custom); return out; }
+        out.add(defaultUrl());
+        for (String prefix : MIRROR_PREFIXES) out.add(prefix + defaultUrl());
+        return out;
+    }
+
     private static final class Fetched {
         final String text;      // null = 304 未变
         final String etag;
@@ -106,9 +128,21 @@ public class RuleUpdateService extends JobService {
     /** 同步执行；失败时绝不覆盖上一版。返回给 UI 的一段中文结论。 */
     public static synchronized String checkNow(Context c) throws Exception {
         Prefs p = Prefs.get(c);
-        String ruleUrl = p.ruleUrl().isEmpty() ? defaultUrl() : p.ruleUrl();
+        List<String> urls = candidates(p);
 
-        Fetched rule = fetch(ruleUrl, p.etag("rule"));
+        // 逐个候选尝试，网络类失败（重置/超时/DNS）换下一个；全部失败抛最后一个，
+        // 让 UI 的「更新失败」保留原始原因。合法性闸之后的逻辑与单源版一致。
+        Fetched rule = null;
+        Exception last = null;
+        for (String url : urls) {
+            try {
+                rule = fetch(url, p.etag("rule"));
+                break;
+            } catch (java.io.IOException | IllegalStateException e) {
+                last = e;
+            }
+        }
+        if (rule == null) throw (last != null) ? last : new IllegalStateException("无可用的上游 URL");
 
         p.lastCheck(System.currentTimeMillis());
         if (rule.text == null) return "已检查：上游无变化（ETag 304）";

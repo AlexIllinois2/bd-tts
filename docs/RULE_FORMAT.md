@@ -109,7 +109,13 @@ vendor 里上游没有的键追加到末尾，最后应用用户覆盖与删除�
 
 - `RuleUpdateService`（`JobScheduler`，默认每 6 小时、需网络、重启后保留）拉一个 URL：
   - `https://raw.githubusercontent.com/AlexIllinois2/midu_unified_rule/main/conf/unified_rule.txt`
-  - 设置页可改成镜像 / 自建 URL。
+  - **镜像回退（2026-11-13）**：未设置自定义 URL 时按「源站 → gh-proxy.com 前缀 →
+    ghproxy.net 前缀」顺序尝试（代理前缀直接拼在原 URL 前），网络类失败
+    （TLS 重置 / 超时 / 非 2xx）自动换下一个，全失败才报错并保留原始原因。
+    raw.githubusercontent.com 在国内网络 TLS 握手即被 RST（真机实测 curl 35 / 0.2s），
+    jsDelivr 在部分网络同样不可达，故走代理前缀镜像；镜像失效只需改
+    `RuleUpdateService.MIRROR_PREFIXES`。
+  - 设置页可改成镜像 / 自建 URL（自定义 URL 是显式选择，不做镜像拼接）。
 - 用 `If-None-Match` + ETag；304 就不动文件。
 - 落盘前过闸：`Rules.looksValid()`（非空、<4 MiB、无 NUL、可解析规则 ≥ 20 行、错误率 < 25%），
   **不合格就保留上一版**，绝不把坏文件写进引擎资源根。

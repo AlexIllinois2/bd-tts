@@ -100,7 +100,7 @@ fun RulesPage(refresh: Int, toast: (String) -> Unit) {
                         prefs.intervalHours(it.toIntOrNull()?.coerceAtLeast(1) ?: 6)
                         toast("已保存并重新排程")
                     })
-                EditRow(Icons.Default.Share, "上游 unified_rule.txt URL", ruleUrl, "留空用默认",
+                EditRow(Icons.Default.Share, "上游 unified_rule.txt URL", ruleUrl, "留空用默认（源站+镜像回退）",
                     onCommit = { ruleUrl = it; prefs.ruleUrl(it); toast("已保存") })
             }
         }
