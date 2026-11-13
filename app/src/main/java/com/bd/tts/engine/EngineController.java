@@ -150,11 +150,37 @@ public final class EngineController {
         return out;
     }
 
+    /**
+     * 内联拼音 / 整段 SSML 需要本句把 tts_text_type 切到指定值。引擎没有
+     * clearOption，setOption 同键是覆盖语义：键已存在就替换值，而不是再追加
+     * 一条（重复键会让 host2 的 O 快照与进程内 setOption 各自依赖「最后一条生效」，
+     * 显式替换掉更可读）。tts_text_type 不在 RESERVED_KEYS / SVO_RESERVED 名单里，
+     * 每句切换已实测可行（2026-11-13 真机）。
+     */
+    private static List<EngineOption> withTextType(List<EngineOption> options, String value) {
+        List<EngineOption> out = new ArrayList<>(
+                options == null ? Collections.<EngineOption>emptyList() : options);
+        for (int i = 0; i < out.size(); i++) {
+            if ("tts_text_type".equals(out.get(i).key)) {
+                out.set(i, new EngineOption("tts_text_type", value, EngineOption.STRING));
+                return out;
+            }
+        }
+        out.add(new EngineOption("tts_text_type", value, EngineOption.STRING));
+        return out;
+    }
+
     // 注意：这里刻意不是 synchronized。host2 一次合成可能几十秒，而 RulesPage 在
     // 主线程调 applyRules → invalidate()（synchronized(this)）；方法级锁会让主页
     // 在这几十秒里直接 ANR。只把「操作 native handle」的几步锁住即可。
     private byte[] synthesizeInternal(String text, int speed, int pitch, int volume,
                                       List<EngineOption> options) throws Exception {
+        // 内联拼音 [[词|pin1 yin1]] → SSML phoneme；调用方直接传 <speak> 也放行。
+        PinyinInline.Result py = PinyinInline.convert(text);
+        if (py.ssml) {
+            text = py.text;
+            options = withTextType(options, "ssml");
+        }
         // 纯标点 / 空白片段会让离线引擎 frontend 报错且不给结束标记，
         // 常驻 daemon 会一直空等并堵住后续所有请求（Legado 连续朗读实测）。
         if (!Speakable.hasReadable(text)) return Speakable.shortSilence();
@@ -237,6 +263,13 @@ public final class EngineController {
         SoundProfile p = profile == null ? SoundProfiles.active(app) : profile;
         List<EngineOption> opts = p.toOptions();
         int speed = p.speedFor(ratePercent);
+        // host2 流式路径不经过 synthesizeInternal，内联拼音在这里先转换一次；
+        // 兜底再进 synthesizeInternal 时 <speak> 前缀直通，选项键替换不重复。
+        PinyinInline.Result py = PinyinInline.convert(text);
+        if (py.ssml) {
+            text = py.text;
+            opts = withTextType(opts, "ssml");
+        }
         Prefs prefs = Prefs.get(app);
         String mode = prefs.backend();
         lastOptions = opts == null || opts.isEmpty() ? "（无扩展选项）" : opts.toString();

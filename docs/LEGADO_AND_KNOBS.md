@@ -97,12 +97,28 @@ fake_jni.c: midu_engine_synth_ex
 
 | 参数 | 说明 |
 |---|---|
-| `text` / `speakText` | 朗读文本（必填），服务端按句切分后逐句合成再拼 PCM |
+| `text` / `speakText` | 朗读文本（必填），服务端按句切分后逐句合成再拼 PCM；支持内联拼音（见下） |
 | `speed` / `speakSpeed` | Legado 档位 5–50，`20 = 100%`；`>60` 直接当百分比 |
 | `pitch` | 音高百分比，100 = 正常 |
 | `tone` / `toneId` / `profile` | 发言人 toneID，即本地预设 id |
 | `emotion` / `tag` | 情绪名或 `[情绪标签]` |
 | 任意 `tts_*` / `voiceconv_*` | 直接覆盖对应 Knob；`STATIC` 项受「允许实验性覆盖」开关约束 |
+
+### 内联拼音（`[[字词|pin1 yin1]]`，2026-11-13 真机实测）
+
+`text` 里可以临时注音，不用写规则、不用重建引擎：
+
+```
+text=[[行人|xing2 ren2]]如织，脚步匆匆。
+text=他[[重|zhong4]]要的[[种|zhong3]]子丰收了。
+```
+
+- 拼音用空格分隔逐字对应，声调 1–5；命中时该句自动切 `tts_text_type=ssml`，
+  引擎按 `<phoneme alphabet="py">` 逐字覆写（日志 `overwrite pinyin to …`）；
+- **拼音个数必须与汉字个数相等**，否则该句引擎会近乎静音——app 侧已做校验：
+  任一标签不合法就只摘掉 `[[ ]]` 标记按普通文本读，绝不喂坏 SSML；
+- 直接传整段 `<speak>` SSML 也原样支持；系统 TTS 与 App 试听同样吃这套语法
+  （统一在 `engine/PinyinInline.java` 转换，所有 `EngineController` 入口生效）。
 
 示例：
 

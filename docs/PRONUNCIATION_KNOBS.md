@@ -128,30 +128,32 @@ PY
 
 ---
 
-## 4）SSML / 前端覆写层 —— **最值得下一步挖的口子**
+## 4）SSML / 前端覆写层 —— **✅ 已实测可用（2026-11-13 真机）**
 
-`.so` 里成组出现（静态证据，未实测）：
+`.so` 静态证据 + Redmi Note 8 Pro（host2 daemon :18946，serve_py.log）实跑验证：
 
-```
-SsmlParser / SsmlSplit / SsmlWordNode / SsmlTobiNode / SsmlTextNode
-ApplyPinyinSsmlOverwrite failed / pinyin info : ssml range mismatched!
-no need to overwrite g2p result as the text is not ssml
-overwrite pinyin to {}, word_index:{}, text:{}
-overwrite prosody to {}, word_index:{}, text:{} / overwrite prosody for poetry text:{}
-overwrite IPA succeed for word: {}, text_index:{} / no need to overwrite ipa : info is empty
-no need to overwrite expressive : info is empty
-tts_frontend_overwrite_label / overwrite label
-```
+| 事实 | 证据 |
+|---|---|
+| `tts_text_type` **不在** SVO_RESERVED / RESERVED_KEYS 名单里，可每句经 setOption / O 快照切换 | rig `host2.c`；plain→ssml→plain 无残留（after_plain PCM 与基线一致） |
+| 引擎**每句合成时**读 `tts_text_type`（非 init-only） | ssml 句后紧跟的 plain 句打印 `no need to overwrite g2p result as the text is not ssml` |
+| `<phoneme alphabet="py" ph="xing2">行</phoneme>` 逐字覆写拼音 | `1 pinyins are parsed from: xing2` → `overwrite pinyin to xing2, word_index:3, text:行` |
+| 多字词 `ph="zha1 dai4"` 逐字对应 | `2 pinyins are parsed` → word_index:4/5 各自覆写 |
+| 一句内任意多个 phoneme 节点 | 种→zhong3、重→zhong4 同时生效 |
+| **ph 拼音数 ≠ 节点汉字数 ⇒ 整句近乎静音** | `py text size: 2 does not match pinyins size:1`，实测仅 3840B |
+| `yi2` 被引擎内部音位化为 `i2` | `overwrite pinyin to i2` |
+| alphabet 白名单（.so rodata）：`jp-accent / expressive / ipa / ipa-pd / en_py`（`py` 是代码内立即数比较，不以 rodata 字符串出现） | §0 脚本可复现 |
 
-推断（**尚待验证**）：把 `tts_text_type` 从 `plain` 换成 SSML 档、或给
-`tts_frontend_overwrite_label` 喂一份 label 覆写，就能**对单次合成**指定某个词的拼音，
-不用改规则文件、也不用重建引擎。这对「临时改一个读音」比三层规则更轻。
+**调用方语法（app 已实现，`engine/PinyinInline.java`）**：任何经
+`EngineController.synthesize / synthesizeStream` 的文本（试听 / 系统 TTS / Legado HTTP）
+支持 `[[字词|pin1 yin1]]`（拼音数=汉字数、声调 1-5、纯汉字），或整段 `<speak>` SSML 直通；
+命中时自动给本句切换 `tts_text_type=ssml`（`withTextType` 同键替换不追加）。
+校验不过只摘掉标记按普通文本读，绝不喂坏 SSML——数量不匹配会废掉整句（见上表）。
 
-验证路线（MuMu 上做）：
-1. 在 `EngineController` 加一个 debug 开关，把 `tts_text_type` 设为 `ssml`，
-   文本喂 `<speak>雪中悍刀<phoneme alphabet="py" ph="hang2">行</phoneme></speak>` 之类的候选；
-2. 用 §1 的前端标注日志看 `pinyin list before/after apply rules` 是否变化；
-3. 再试 `tts_frontend_overwrite_label` 的 label 串格式（需要更多字符串/反汇编证据）。
+原静态证据串（留档）：SsmlParser / SsmlSplit / SsmlPhonemeNode / ApplyPinyinSsmlOverwrite
+failed / `overwrite pinyin to {}, word_index:{}, text:{}` / `no need to overwrite g2p result
+as the text is not ssml` / tts_frontend_overwrite_label。
+
+`tts_frontend_overwrite_label` 的 label 串格式仍未知；phoneme 路已覆盖需求，暂不挖。
 
 ---
 

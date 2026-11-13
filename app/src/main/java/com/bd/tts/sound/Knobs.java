@@ -80,7 +80,8 @@ public final class Knobs {
 
         add(Knob.builder("tts_text_type", "文本类型", GROUP_FRONTEND)
                 .choices("plain", "ssml")
-                .desc("改成 ssml 可能启用 SsmlParser 与 <phoneme> 拼音覆写；载荷格式未验。")
+                .desc("已实测（2026-11-13 真机）：ssml 启用 <phoneme alphabet=\"py\"> 拼音覆写；"
+                        + "每句可切，[[词|pin1 yin1]] 内联注音无需手动改这里。")
                 .evidence(Knob.STATIC).build());
         add(Knob.builder("tts_frontend_overwrite_label", "前端标签覆写", GROUP_FRONTEND)
                 .string("")

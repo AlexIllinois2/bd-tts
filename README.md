@@ -66,7 +66,7 @@ midu-tts/
 │       │   ├── BdTtsService.java          # TextToSpeechService
 │       │   ├── SettingsActivity.java        # 0.1.x 经典设置页（保留入口，不再是启动器）
 │       │   ├── TtsIntents.java              # CHECK_TTS_DATA / GET_SAMPLE_TEXT
-│       │   ├── engine/                      # NativeEngine / EngineController / Host2ShellBackend / EngineOption
+│       │   ├── engine/                      # NativeEngine / EngineController / Host2ShellBackend / EngineOption / PinyinInline（内联拼音）
 │       │   ├── sound/                       # Knob / Knobs(28 项能力表) / SoundProfile / SoundProfiles
 │       │   ├── rules/                       # Rules(解析+合并) / RuleManager / RuleUpdateService
 │       │   ├── source/                      # VoiceSource / Bundled / Directory / Shizuku / ResourceRoot
@@ -194,6 +194,22 @@ App 设置页（`android.speech.tts.engine.CONFIGURE_ENGINE` 也能从系统设�
 
 核心逻辑在 `rules/PronunciationEditor.kt`（纯 Kotlin、无 Android 依赖），
 页面在 `ui/pages/PronunciationPage.kt`，落盘与重建引擎走 `ui/Actions.kt` → `RuleManager.apply()`。
+
+## 3.2）调用方内联拼音（`[[字词|pin1 yin1]]`，不走规则层）
+
+任何经 `EngineController` 的文本（系统 TTS / Legado HTTP / App 试听框）都支持**临时注音**：
+
+```
+[[行人|xing2 ren2]]如织，脚步匆匆。      # 逐字覆写，声调 1-5，拼音数=汉字数
+```
+
+- 实现：`engine/PinyinInline.java` 把标签转成 `<speak>…<phoneme alphabet="py" ph="…">…</speak>`，
+  命中的句子自动切 `tts_text_type=ssml`（该键不在保留名单里，每句可切，已真机实测）；
+- 引擎侧日志证据：`overwrite pinyin to xing2, word_index:0, text:行`（详见
+  [`docs/PRONUNCIATION_KNOBS.md`](docs/PRONUNCIATION_KNOBS.md) §4）；
+- **拼音数 ≠ 汉字数时引擎会整句近乎静音**，所以任一标签校验不过就只摘掉标记
+  按普通文本读；直接传整段 `<speak>` SSML 也原样支持。规则层（§3.1）管持久读音，
+  内联拼音管单次合成的临时读音，两者互不影响。
 
 ---
 

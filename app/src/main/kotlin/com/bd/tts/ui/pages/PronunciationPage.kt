@@ -501,7 +501,9 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
                     Text(
                         "读音写法：hua4（完整拼音+声调）/ *5（只改声调，沿用原拼音）/ none5（儿化占位）；多字词逐字对应。\n" +
                                 "条件：TEXT(上下文正则，内层 (…) 圈定改音的字) / WORD_INSIDE(n) / PINYIN(regex) / POS(regex)。\n" +
-                                "应用后规则立即合并、引擎自动重建；也可用「发音规则」页查看合并结果与冲突报告。",
+                                "应用后规则立即合并、引擎自动重建；也可用「发音规则」页查看合并结果与冲突报告。\n" +
+                                "试听/朗读文本可内联临时注音：[[字词|pin1 yin1]]（拼音数=字数，声调 1-5），" +
+                                "如 [[行人|xing2 ren2]]，不改规则即时生效；传整段 <speak> SSML 也直接支持。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
