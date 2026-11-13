@@ -29,6 +29,13 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           test -s "$RUNNER_TEMP/release.keystore"
 
+      - name: Accept SDK licenses and install NDK/CMake
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "ndk;29.0.13846066" "cmake;3.22.1" > /dev/null
+          ls "$ANDROID_HOME/ndk"
+
       - name: Build release APK
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
