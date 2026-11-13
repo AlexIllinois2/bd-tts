@@ -82,6 +82,11 @@ public final class Host2ShellBackend {
             try {
                 syncRules(c);
                 return Host2Daemon.stream(c, text, voice, speed, options, wrapped);
+            } catch (java.util.concurrent.CancellationException ce) {
+                // 调用方主动停止（系统 TTS stop / Legado 调速）：直接上抛，散栈会
+                // 关闭 socket，daemon 的断开探测随即放弃本句。既不能包装成失败、
+                // 也不能回退一次性合成（否则被放弃的半段又完整合成一遍）。
+                throw ce;
             } catch (Exception e) {
                 if (emitted[0] > 0) throw new IllegalStateException(
                         "常驻后端中途失败（已输出 " + emitted[0] + " B PCM）：" + e.getMessage(), e);

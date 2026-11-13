@@ -28,12 +28,20 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 系统「文字转语音（TTS）」里可见、可选、可设为默认的引擎。 */
 public class BdTtsService extends TextToSpeechService {
 
     private static final String TAG = "BdTtsService";
     private static final int SAMPLE_RATE = 24000;   // BV001 这一代；换 16k 代要同步改 C 层选项
+
+    // 客户端 stop()（Legado 调速/切章都会先 stop）时置位；合成 sink 检查到后抛
+    // CancellationException 散栈关 socket，daemon 的断开探测（100ms 轮询）随即
+    // 放弃本句回 accept，下一句立刻开工。没有这个，host2 会把整段合成完才
+    // 让队列派发下一句，Legado 那边表现就是调速后「暂停」十几秒。
+    private final AtomicBoolean clientStopped = new AtomicBoolean(false);
 
     private BroadcastReceiver rulesReceiver;
 
@@ -81,6 +89,7 @@ public class BdTtsService extends TextToSpeechService {
     }
 
     @Override protected void onStop() {
+        clientStopped.set(true);
         EngineController.get(this).stop();
     }
 
@@ -157,6 +166,7 @@ public class BdTtsService extends TextToSpeechService {
             callback.done();
             return;
         }
+        clientStopped.set(false);   // 新 utterance：清除上一次 stop 的取消信号
         // SynthesisRequest 的 rate/pitch 是百分数（100=正常），叠乘在当前声音预设上。
         int rate = request.getSpeechRate() > 0 ? request.getSpeechRate() : 100;
         int pit = request.getPitch() > 0 ? request.getPitch() : 100;
@@ -167,11 +177,12 @@ public class BdTtsService extends TextToSpeechService {
         final boolean[] started = {false};
         final int max = Math.max(4096, callback.getMaxBufferSize());
         PcmSink sink = (buf, len) -> {
-            if (!started[0]) {
-                callback.start(SAMPLE_RATE, AudioFormat.ENCODING_PCM_16BIT, 1);
-                started[0] = true;
-            }
             for (int off = 0; off < len; off += max) {
+                if (clientStopped.get()) throw new CancellationException("客户端已 stop()");
+                if (!started[0]) {
+                    callback.start(SAMPLE_RATE, AudioFormat.ENCODING_PCM_16BIT, 1);
+                    started[0] = true;
+                }
                 callback.audioAvailable(buf, off, Math.min(max, len - off));
             }
         };
@@ -190,6 +201,12 @@ public class BdTtsService extends TextToSpeechService {
         for (String part : parts) {
             try {
                 ec.synthesizeStream(part, profile, rate, pit, sink);
+            } catch (CancellationException ce) {
+                // 客户端已 stop()（Legado 调速/切章）：立刻收尾，剩余片段不再合成，
+                // 让系统队列尽快派发客户端的下一个 utterance。socket 随散栈关闭，
+                // daemon 侧断开探测会同步放弃它手里那半句。
+                Log.i(TAG, "客户端停止，中断本 utterance 剩余片段");
+                break;
             } catch (Throwable t) {
                 // 单句失败只跳过这一句：Legado 靠 onDone 驱动下一句，
                 // 一旦 error() 整章朗读就停了。已吐出的 PCM 不重播。
@@ -197,7 +214,7 @@ public class BdTtsService extends TextToSpeechService {
                 Log.w(TAG, "跳过一句合成失败（" + part.length() + " 字）：" + t.getMessage());
             }
         }
-        if (!started[0]) {
+        if (!started[0] && !clientStopped.get()) {
             // 全部句子都失败也补静音正常收尾，别让调用方卡在等 onDone。
             emitSilence(sink);
         }
