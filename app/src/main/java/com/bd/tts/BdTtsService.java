@@ -87,16 +87,38 @@ public class BdTtsService extends TextToSpeechService {
     @Override public List<Voice> onGetVoices() {
         List<Voice> out = new ArrayList<>();
         String[] names = EngineController.get(this).voices();
-        if (names == null || names.length == 0) names = new String[]{Prefs.get(this).voice()};
+        if (names == null || names.length == 0) {
+            String fallback = Prefs.get(this).voice();
+            names = (fallback == null || fallback.isEmpty())
+                    ? new String[]{"default"} : new String[]{fallback};
+        }
         for (String n : names) {
-            out.add(new Voice(n, new Locale("zh", "CN"), Voice.QUALITY_VERY_HIGH,
+            if (n == null) continue;
+            out.add(new Voice(safeVoiceName(n), new Locale("zh", "CN"), Voice.QUALITY_VERY_HIGH,
                     Voice.LATENCY_NORMAL, false, Collections.<String>emptySet()));
         }
         return out;
     }
 
+    /**
+     * Voice 名转成合法 BCP-47 标签。MIUI 文字转语音设置页会把默认引擎的 Voice 名
+     * 当语言标签解析（TtsEngines.getLocaleFromLanguageTag），解析失败得到 null 直接
+     * 塞进 ListPreference，渲染时 NPE 整页崩（卸载旧 midu-tts、本引擎设为默认后
+     * 实测触发）。子标签限制 [a-z0-9]{1,8} 保证 Locale.forLanguageTag 全程有效。
+     * 合成路径从不匹配 voice 名（synthesis 只读 Prefs.voice()），这里改名无副作用。
+     */
+    private static String safeVoiceName(String raw) {
+        StringBuilder sb = new StringBuilder("zh-cn");
+        for (String part : raw.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")) {
+            if (part.isEmpty()) continue;
+            sb.append('-').append(part, 0, Math.min(part.length(), 8));
+        }
+        return sb.toString();
+    }
+
     @Override public String onGetDefaultVoiceNameFor(String lang, String country, String variant) {
-        return Prefs.get(this).voice();
+        String v = Prefs.get(this).voice();
+        return (v == null || v.isEmpty()) ? "zh-cn-default" : safeVoiceName(v);
     }
 
     @Override public int onIsValidVoiceName(String voiceName) {
