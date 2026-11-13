@@ -17,8 +17,8 @@ android {
         applicationId "com.bd.tts"
         minSdk 26
         targetSdk 34
-        versionCode 2
-        versionName "0.2.0"
+        versionCode 3
+        versionName "1.0.0"
 
         // 本包只有 arm64-v8a 的厂商库闭包（见 README §0）。
         ndk { abiFilters 'arm64-v8a' }
@@ -66,10 +66,29 @@ android {
         }
     }
 
+    // CI 用 debug key 签 release APK：签名与日常 debug 包一致，可直接覆盖安装。
+    // keystore 经 GitHub secret（ANDROID_KEYSTORE_BASE64 = ~/.android/debug.keystore）
+    // 解码为文件后由环境变量传入；本地无这些变量时不挂 signingConfig（出未签名包）。
+    signingConfigs {
+        ciRelease {
+            def ksFile = System.getenv("ANDROID_KEYSTORE_FILE")
+            if (ksFile != null && file(ksFile).exists()) {
+                storeFile file(ksFile)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            def ksFile = System.getenv("ANDROID_KEYSTORE_FILE")
+            if (ksFile != null && file(ksFile).exists()) {
+                signingConfig signingConfigs.ciRelease
+            }
         }
     }
 }

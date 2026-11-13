@@ -145,6 +145,33 @@ SDK 组件缺失时用本机 cmdline-tools 补装（版本要与上表一致）�
 > 若用 `--no-data`，`assets/rules/vendor_unified_rule.txt` 仍然会带上（规则是纯文本），
 > 但 `assets/midu/` 为空：必须设置「自定义目录」或「MultiTTS(Shizuku)」才能出声。
 
+### 2.1）自动发布（GitHub CI）
+
+**推 `v*` tag 即自动构建并发布**（`.github/workflows/release.yml`）：
+
+```bash
+git tag v1.0.0 && git push github v1.0.0     # 构建完在 Releases 页出现同名 Release + APK
+```
+
+流程：JDK 17 → `assembleRelease` → `apksigner verify` 签名自检 →
+`softprops/action-gh-release` 发布，APK 命名 `bd-tts-<tag>.apk`，Release 标题 = tag 名，
+release notes 自动生成。也可在 Actions 页手动 `workflow_dispatch` 触发（发布当前默认分支快照）。
+
+**签名：release APK 用 debug key 签（刻意为之）。** 密钥就是本机
+`~/.android/debug.keystore`（标准口令 `android` / `androiddebugkey`），经 GitHub Actions
+secret `ANDROID_KEYSTORE_BASE64` 注入（另有 `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` /
+`ANDROID_KEY_PASSWORD` 三个 secret 固定填 `android` / `androiddebugkey` / `android`）。
+这样选的好处：
+
+- CI 产物与本地 `assembleDebug` 同签名，可直接 `adb install -r` 覆盖安装，不用先卸载；
+- 不用维护独立 release keystore，密钥丢了/换机器也只是重建 debug key + 重装一次。
+
+代价：public 仓库下 debug key 无保密强度（口令固定公开），**别把 CI 产物当可信任分发渠道**，
+只自用。换机器后想保持签名一致，把 `~/.android/debug.keystore` 带过去即可。
+
+本地构建 release 不设 `ANDROID_KEYSTORE_FILE` 等环境变量时自动跳过签名（出未签名包），
+设置后（如 CI 一样指向某个 keystore 文件）则按配置签名。
+
 ---
 
 ## 3）安装与启用
