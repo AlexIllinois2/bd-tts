@@ -1,15 +1,15 @@
 // 仓库选择：本地网络 maven.google.com 直连超时，默认走阿里云镜像（~0.2s）；
 // GitHub CI（runner 上有 CI=true，海外访问阿里云会 502）跳过镜像直连官方仓库。
 // 显式声明，避免依赖 ~/.gradle/init.d 的全局脚本也能构建。
-def onCi = (System.getenv('CI') ?: 'false') == 'true'
-def aliyunRepos = [
-        'https://maven.aliyun.com/repository/google',
-        'https://maven.aliyun.com/repository/public',
-]
+// 注意：pluginManagement 必须是 settings.gradle 的第一条语句，变量只能在块内声明。
 
 pluginManagement {
+    def onCi = (System.getenv('CI') ?: 'false') == 'true'
     repositories {
-        if (!onCi) aliyunRepos.each { u -> maven { url u } }
+        if (!onCi) {
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+        }
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -18,8 +18,12 @@ pluginManagement {
 dependencyResolutionManagement {
     // PREFER_SETTINGS 让依赖解析只以这里为准，也兼容将来追加的 init 脚本。
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    def onCi = (System.getenv('CI') ?: 'false') == 'true'
     repositories {
-        if (!onCi) aliyunRepos.each { u -> maven { url u } }
+        if (!onCi) {
+            maven { url 'https://maven.aliyun.com/repository/google' }
+            maven { url 'https://maven.aliyun.com/repository/public' }
+        }
         google()
         mavenCentral()
     }
