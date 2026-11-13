@@ -3,12 +3,11 @@
 """
 离线校验三层规则合并（与 app/src/main/java/.../Rules.java 同语义，纯 Python 版）。
 
-  python android/scripts/verify_rules.py
+    python android/scripts/verify_rules.py
       vendor = host2rig/midu/zh-cn/frontend/g2p/mnc/unified_rule.txt
       上游   = android/local_rules/upstream_unified_rule.txt   （若存在）
-      补丁   = android/local_rules/upstream_rule_patch.txt     （若存在）
       用户   = android/local_rules/user_rules.txt              （若存在）
-  python android/scripts/verify_rules.py --vendor A --upstream B --patch C --user D --out merged.txt
+  python android/scripts/verify_rules.py --vendor A --upstream B --user C --out merged.txt
 """
 import argparse
 import re
@@ -118,9 +117,9 @@ def parse(text):
     return out
 
 
-def merge(vendor_text, upstream_text, patch_text, user_text):
-    vendor, upstream, patch, user = map(parse, (vendor_text, upstream_text, patch_text, user_text))
-    blocked = patch.removals | user.removals
+def merge(vendor_text, upstream_text, user_text):
+    vendor, upstream, user = map(parse, (vendor_text, upstream_text, user_text))
+    blocked = user.removals
 
     base = list(upstream.adds) if upstream.adds else list(vendor.adds)
     keys = {r.key() for r in base}
@@ -159,12 +158,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--vendor", default=str(DEFAULT_VENDOR))
     ap.add_argument("--upstream", default=str(LOCAL / "upstream_unified_rule.txt"))
-    ap.add_argument("--patch", default=str(LOCAL / "upstream_rule_patch.txt"))
     ap.add_argument("--user", default=str(LOCAL / "user_rules.txt"))
     ap.add_argument("--out", default="")
     a = ap.parse_args()
 
-    lines, conflicts, counts = merge(read(a.vendor), read(a.upstream), read(a.patch), read(a.user))
+    lines, conflicts, counts = merge(read(a.vendor), read(a.upstream), read(a.user))
     print(f"vendor={counts[0]} 上游={counts[1]} 用户={counts[2]} 最终={counts[3]} 冲突={len(conflicts)}")
     for c in conflicts[:30]:
         print("  " + c)

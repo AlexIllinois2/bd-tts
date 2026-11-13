@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # mumu_debug.sh — MuMu 模拟器上的一条龙调试（连接 / ABI 预检 / 装包 / 推语音包 / 设为默认引擎 / 抓日志）
 #
-#   PORT=16384 ./android/scripts/mumu_debug.sh            # MuMu 12 本体
-#   PORT=5555  ./android/scripts/mumu_debug.sh            # MuMu 5.0
-#   PORT=7555  ./android/scripts/mumu_debug.sh            # MuMu 6
-#   SER=127.0.0.1:16384 APK=.../app-debug.apk ./android/scripts/mumu_debug.sh
-#   SKIP_INSTALL=1 ./android/scripts/mumu_debug.sh        # 只做预检 + 日志
+#   PORT=16384 ./scripts/mumu_debug.sh            # MuMu 12 本体
+#   PORT=5555  ./scripts/mumu_debug.sh            # MuMu 5.0
+#   PORT=7555  ./scripts/mumu_debug.sh            # MuMu 6
+#   SER=127.0.0.1:16384 APK=.../app-debug.apk ./scripts/mumu_debug.sh
+#   SKIP_INSTALL=1 ./scripts/mumu_debug.sh        # 只做预检 + 日志
+#
+#   本机环境：adb 已在 /usr/bin/adb（也可 ADB=/home/v/Android/Sdk/platform-tools/adb 指定）；
+#   APK 默认取工程内 app/build/outputs/apk/debug/app-debug.apk。
 #
 # ★硬前提：厂商 libspeechengine.so 只有 arm64-v8a 原件。MuMu 必须支持并选中 arm64-v8a，
 #   否则 app 进程里 dlopen 会直接失败（改走真机 / 支持 ARM64 的镜像）。
@@ -16,7 +19,7 @@ WORKSPACE="$(cd "$ANDROID/.." && pwd)"
 ADB="${ADB:-adb}"
 PORT="${PORT:-16384}"
 SER="${SER:-127.0.0.1:$PORT}"
-PKG="${PKG:-com.midu.tts}"
+PKG="${PKG:-com.bd.tts}"
 APK="${APK:-$ANDROID/app/build/outputs/apk/debug/app-debug.apk}"
 EMU_VOICE="${EMU_VOICE:-/sdcard/midu_voice}"
 EMU_RIG="${EMU_RIG:-/data/local/tmp/host2rig}"
@@ -74,6 +77,6 @@ echo "== 打开设置页（在里面点『冒烟自检』/『冒烟并播放』�
 "$ADB" -s "$SER" shell monkey -p "$PKG" 1 >/dev/null
 
 echo "== logcat（Ctrl-C 结束）"
-echo "   midu-bridge / midu-fakejni / MiduTtsService / MiduRuleUpdate / MiduRemoteFile"
-"$ADB" -s "$SER" logcat -v time -s midu-bridge:V midu-fakejni:V MiduTtsService:V \
-    MiduRuleUpdate:V MiduRemoteFile:V AndroidRuntime:E
+echo "   midu-bridge / midu-fakejni / BdTtsService / BdRuleUpdate / BdRemoteFile"
+"$ADB" -s "$SER" logcat -v time -s midu-bridge:V midu-fakejni:V BdTtsService:V \
+    BdRuleUpdate:V BdRemoteFile:V AndroidRuntime:E

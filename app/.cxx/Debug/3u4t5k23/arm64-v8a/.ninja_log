@@ -1,4 +1,0 @@
-# ninja log v5
-30	409	8159297907201279	CMakeFiles/midu_bridge.dir/midu_bridge.c.o	e4a45f4287c8dd6e
-1	758	8159297911474950	CMakeFiles/midu_bridge.dir/fake_jni.c.o	b82d5a1f2394e1a2
-759	1009	8159297913799600	D:/weiheng/proj/midu-tts/android/app/build/intermediates/cxx/Debug/3u4t5k23/obj/arm64-v8a/libmidu_bridge.so	19b3296fce66ae2e

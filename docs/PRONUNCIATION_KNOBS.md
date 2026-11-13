@@ -7,14 +7,15 @@
 
 - 已按你的要求装了 **REA（逆向工程任何目标）** skill。当前会话里没有注册 REA 的 MCP 分析服务，
   因此走 REA 允许的「本地静态证据」路线：直接对仓库里的 ELF 原件做字符串与依赖闭包盘点，不执行目标。
-  （本机后来已补齐 JDK 17 / Android SDK 35+36 / NDK 27 / CMake 3.22.1 / adb，并实际构建出 debug APK；
-  当初写成「本机没有工具链」是误判，已更正。）
+  （本机 Linux 工具链：JDK 17 (Temurin) / Android SDK 34~37 / NDK 29.0.13846066 /
+  CMake 3.22.1 / adb，并实际构建出 debug APK；当初写成「本机没有工具链」是误判，已更正。
+  注意 `ndk/27.0.12077973` 只是空壳目录，实际用的是 29。）
 - 目标：`host2rig/lib/libspeechengine.so`（21,967,568 B，md5 `3485827bce49163a7ac7cf45578af5d5`，
   与 `MANIFEST.md5` 可逐枚对账）。
 - 方法（可重跑）：
 
 ```bash
-cd D:/weiheng/proj/midu-tts
+cd /home/v/.local/project/midu-tts
 python - <<'PY'
 import re
 b=open('host2rig/lib/libspeechengine.so','rb').read()
@@ -115,7 +116,15 @@ PY
 | `tts_voice_online` / `tts_voice_type_online` / `tts_cluster` / `tts_uri` / `tts_address` / `tts_conn_timeout` | 在线链路（本工程不用） | 静态字符串 |
 | `tts_use_voiceclone` / `voiceconv_*` 一族 | 声音克隆 / 变声（另一整条链） | 静态字符串 |
 
-完整枚举（53 个 `tts_*` 键）由 §0 的脚本可复现。
+完整枚举（53 个 `tts_*` 键、18 个 `voiceconv_*` 键）由 §0 的脚本可复现。
+
+> **2026-11-13 证据复核**：对 `Knobs.java` 里 22 个 STATIC 键逐个在引擎二进制
+> （真机 `rig/lib/` 与 `vendor/` zip 双源）跑 `strings`，21 个确认命中
+> （`tts_fadein/out_duration`、`tts_concurrency_mode` 各 ×2，其余 ×1）。
+> 唯一无证据的是 `voiceconv_formant`——真实 `voiceconv_*` 一族里没有它，
+> 已从 Knobs 表移除，换成真实存在的 `voiceconv_volume`。
+> 注意：命中只证明引擎认识键名，是否有音效仍以实测为准（目前只实测过
+> `tts_pitch` / `tts_volume` / `tts_silence_duration` / emotion 回填）。
 
 ---
 

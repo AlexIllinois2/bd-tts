@@ -2,6 +2,7 @@
 .gradle/
 build/
 app/build/
+app/.cxx/
 local.properties
 *.iml
 .idea/
@@ -23,3 +24,11 @@ local_rules/user_rules.txt.bak
 # 构建产物（APK 大件不入库，仅供本机自用）
 dist/
 *.apk
+rig/out/
+rig/src/.deps/
+
+# 厂商原件压缩包（合规：不随源码外传、不重新分发）
+vendor/
+
+# 本机会话数据
+.workbuddy/

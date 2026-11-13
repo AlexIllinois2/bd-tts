@@ -11,7 +11,7 @@
 | 预设 | `sound/SoundProfile.java`、`SoundProfiles.java` | 多套参数预设，JSON 持久化、导入导出、内置四套（标准 / 沉稳播报 / 轻快 / 小说慢读） |
 | 下发 | `engine/EngineOption.java` → `NativeEngine.synthEx` → `midu_engine_synth_ex` | 从「固定三个韵律参数」升级成**任意选项通道** |
 | 护栏 | `jni/fake_jni.c` 的 `RESERVED_KEYS` | UI/URL 无法覆盖会破坏授权与 PCM 回调的初始化档位 |
-| 系统 TTS | `MiduTtsService.java` | 改用当前预设；`speechRate%` / `pitch%` 叠乘在预设档位上 |
+| 系统 TTS | `BdTtsService.java` | 改用当前预设；`speechRate%` / `pitch%` 叠乘在预设档位上 |
 | Legado | `legado/LegadoHttpServer.kt` 等 | 本机 HTTP 朗读引擎，返回 `audio/wav`，可生成可导入的 HttpTTS JSON |
 | UI | `ui/*` | Jetpack Compose + Material 3（动态取色、大圆角分组卡片、图标化设置项、折叠顶栏、底部导航） |
 
@@ -78,7 +78,7 @@ fake_jni.c: midu_engine_synth_ex
 
 所以本工程做了一个**前台服务里的本地 HTTP 服务**：Legado 用「网络朗读」直连本机，
 全部参数通过 query / body 传进来，绕开系统 TTS 的参数限制。系统 TTS 引擎本身保留
-（阅读器仍可在系统设置里选 Midu TTS），两条路都通。
+（阅读器仍可在系统设置里选 BD TTS），两条路都通。
 
 ## 3）HTTP 接口
 
@@ -118,7 +118,7 @@ UI「Legado 对接」页一键复制：
 [
   {
     "id": 20261109001,
-    "name": "Midu 离线 TTS（本机）",
+    "name": "BD 离线 TTS（本机）",
     "url": "http://127.0.0.1:8765/tts,{\"method\":\"POST\",\"headers\":{...},\"body\":\"text={{java.encodeURI(speakText)}}&speed={{speakSpeed}}&tone={{java.encodeURI(currentToneID)}}&emotion={{java.encodeURI(currentEmotionName)}}&tag={{java.encodeURI(currentEmotionTag)}}\"}",
     "contentType": "audio/wav",
     "concurrentRate": "0",
@@ -153,9 +153,14 @@ AGP 8.13.2 / compileSdk 36），对齐本机已验证可构建的组合。
 
 ## 5）边界（照旧，不夸口）
 
-- 「已实测」只有 `tts_speed` / `tts_pitch` / `tts_volume` 以及 host2 env 验过存在的三项。
-  其余 19 项**只是 .so 字符串证据**，UI 明确标注，默认不下发；下发后是否有效要看
-  logcat 的前端标注日志，不要拿 PCM 字节比对（不钉种子同文本也不同）。
+- 「已实测」只有 `tts_speed` / `tts_pitch` / `tts_volume` 以及 host2 env 验过存在的三项，
+  其余扩展项**只是 .so 字符串证据**。所有非空扩展项都会下发（调用方参数优先）：
+  进程内 JNI 走 `setOption*ToNative`，常驻 daemon 走协议 v2 的 `O` 快照逐句下发
+  （19 项扩展 + 基础 `tts_pitch` / `tts_volume` = 21 项，`tts_speed` 走 `S` 行），
+  一次性 host2 仍只认 3 个 env 档位、会静默跳过 pitch/volume。
+  下发后是否有效要看引擎日志，不要拿 PCM 字节比对（不钉种子同文本也不同）。
+  实测 `tts_pitch` 改档会明显改变过零率；`tts_volume` 只有 0（静音）与非 0 的差别，
+  50 与 100 幅度几乎一致，进程内 JNI 也是同一个 `setInt`，属引擎自身行为。
 - 不修改 `libspeechengine.so` 一个字节；授权仍走合法 `licbag` 原件 +
   假 JNIEnv 回报宿主包名 `com.lechuan.mdwz`。
 - MuMu 的 x86_64 + houdini 依旧出不了声（arm64 `LD_PRELOAD` shim 注入不了），

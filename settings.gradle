@@ -10,8 +10,8 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
-    // 全局 init 脚本 aliyun-prepend.init.gradle 会向 project 仓库注入镜像；
-    // FAIL_ON_PROJECT_REPOS 会与之冲突，改为以 settings 声明为准。
+    // 本机没有 ~/.gradle/init.d 全局脚本，镜像完全靠下面 settings 显式声明；
+    // PREFER_SETTINGS 让依赖解析只以这里为准，也兼容将来追加的 init 脚本。
     repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         maven { url 'https://maven.aliyun.com/repository/google' }
@@ -20,5 +20,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "MiduTtsEngine"
+rootProject.name = "bd-tts"
 include ':app'

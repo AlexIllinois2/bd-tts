@@ -1,3 +1,0 @@
-D:/weiheng/proj/midu-tts/android/app/.cxx/Debug/1037y5jy/arm64-v8a/CMakeFiles/midu_bridge.dir
-D:/weiheng/proj/midu-tts/android/app/.cxx/Debug/1037y5jy/arm64-v8a/CMakeFiles/edit_cache.dir
-D:/weiheng/proj/midu-tts/android/app/.cxx/Debug/1037y5jy/arm64-v8a/CMakeFiles/rebuild_cache.dir

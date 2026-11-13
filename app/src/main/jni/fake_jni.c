@@ -79,7 +79,7 @@ typedef void    (*fp_setOptDbl)(JNIEnv*, jclass, jlong, jstring, jdouble);
 typedef void    (*fp_destroy)(JNIEnv*, jclass, jlong);
 typedef jstring (*fp_getVersion)(JNIEnv*, jclass);
 
-typedef struct MiduHandle {
+typedef struct BdHandle {
     void* h_engine;
     fp_createEngine   fn_ce;
     fp_initEngine     fn_ie;
@@ -107,9 +107,9 @@ typedef struct MiduHandle {
     char root[768];
     char voice[128];
     char base[64];
-} MiduHandle;
+} BdHandle;
 
-static MiduHandle* g_current = NULL;     /* 当前正在收 PCM 的 handle */
+static BdHandle* g_current = NULL;     /* 当前正在收 PCM 的 handle */
 static char g_last_error[1024] = {0};
 
 static void set_error(const char *fmt, ...) {
@@ -124,7 +124,7 @@ const char* midu_engine_version(void) { return "midu-fakejni/1.0 (host2 rig pari
 
 static void capture(jbyteArray arr) {
     FakeObj *o = asObj(arr);
-    MiduHandle *h = g_current;
+    BdHandle *h = g_current;
     if (!o || !o->data || !o->len || !h) return;
     pthread_mutex_lock(&h->lock);
     if (h->pcm_len + o->len > h->pcm_cap) {
@@ -150,7 +150,7 @@ static void capture(jbyteArray arr) {
     pthread_mutex_unlock(&h->lock);
 }
 
-static void mark_end(MiduHandle *h) {
+static void mark_end(BdHandle *h) {
     if (!h) return;
     pthread_mutex_lock(&h->lock);
     h->end_marker = 1;
@@ -217,7 +217,7 @@ static jmethodID my_GetMethodID(JNIEnv *e, jclass c, const char *name, const cha
 
 static int is_speech_msg(FakeID *m) { return m && strcmp(m->name, "onSpeechMessage") == 0; }
 
-static void pcm_from_varg(va_list ap, MiduHandle *h) {
+static void pcm_from_varg(va_list ap, BdHandle *h) {
     va_list ap2; va_copy(ap2, ap);
     jint i1 = va_arg(ap2, jint);
     jbyteArray b = va_arg(ap2, jbyteArray);
@@ -228,7 +228,7 @@ static void pcm_from_varg(va_list ap, MiduHandle *h) {
     else if (i1 >= 2000) LOGW("onSpeechMessage 异常码 %d (%d)", (int)i1, (int)i2);
     (void)i2;
 }
-static void pcm_from_jval(const jvalue *a, MiduHandle *h) {
+static void pcm_from_jval(const jvalue *a, BdHandle *h) {
     (void)h;
     if (a) capture((jbyteArray)a[1].l);
 }
@@ -347,20 +347,20 @@ static void init_fake_vm(void) {
 /* -------------------------------------------------------------------------
  * 引擎选项（与 host2.c 的 setStr/setInt/setBool 同构）
  * ---------------------------------------------------------------------- */
-static void setStr(MiduHandle *h, const char *k, const char *v) {
+static void setStr(BdHandle *h, const char *k, const char *v) {
     if (!h->fn_ss) return;
     jobject jk = new_str(k), jv = new_str(v ? v : "");
     h->fn_ss(h->penv, h->clazz, h->engine, (jstring)jk, (jstring)jv);
 }
-static void setInt(MiduHandle *h, const char *k, int v) {
+static void setInt(BdHandle *h, const char *k, int v) {
     if (!h->fn_si) return;
     h->fn_si(h->penv, h->clazz, h->engine, (jstring)new_str(k), (jint)v);
 }
-static void setBool(MiduHandle *h, const char *k, int v) {
+static void setBool(BdHandle *h, const char *k, int v) {
     if (!h->fn_sb) return;
     h->fn_sb(h->penv, h->clazz, h->engine, (jstring)new_str(k), v ? JNI_TRUE : JNI_FALSE);
 }
-static void setDbl(MiduHandle *h, const char *k, double v) {
+static void setDbl(BdHandle *h, const char *k, double v) {
     /* 引擎未必导出 setOptionDoubleToNative；缺符号时静默跳过，不破坏主链路。 */
     if (!h->fn_sdbl) return;
     h->fn_sdbl(h->penv, h->clazz, h->engine, (jstring)new_str(k), (jdouble)v);
@@ -385,7 +385,7 @@ static int is_reserved(const char *k) {
 }
 
 /* 逐条下发一条通用选项；返回 1 表示真的下发了。 */
-static int apply_option(MiduHandle *h, const char *k, const char *v, int type) {
+static int apply_option(BdHandle *h, const char *k, const char *v, int type) {
     if (!h || !k || !*k || !v) return 0;
     if (is_reserved(k)) {
         LOGW("选项 %s 属于钉死的初始化档位，已忽略（UI 不应下发）", k);
@@ -406,16 +406,26 @@ static int apply_option(MiduHandle *h, const char *k, const char *v, int type) {
     return 1;
 }
 
+/* lib_dir 支持 ':' 分隔的多目录（files/midu_native:nativeLibraryDir）：
+ * 厂商 so 在 app 数据目录，shim / libc++_shared 在安装目录，按序找第一个命中的。 */
 static void* dlopen_at(const char *lib_dir, const char *name, int required) {
     char path[1024];
-    snprintf(path, sizeof(path), "%s/%s", lib_dir, name);
-    void *h = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
-    if (!h) {
-        char *e = dlerror();
-        if (required) set_error("dlopen 失败 %s : %s", path, e ? e : "?");
-        else LOGW("可选库 %s 未加载：%s", name, e ? e : "?");
+    const char *p = lib_dir;
+    while (p && *p) {
+        const char *colon = strchr(p, ':');
+        int seg = colon ? (int)(colon - p) : (int)strlen(p);
+        if (seg > 0 && seg < (int)sizeof(path) - 2) {
+            void *h;
+            snprintf(path, sizeof(path), "%.*s/%s", seg, p, name);
+            h = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+            if (h) return h;
+        }
+        if (!colon) break;
+        p = colon + 1;
     }
-    return h;
+    if (required) set_error("dlopen 失败 %s（在 [%s] 里都没找到）", name, lib_dir);
+    else LOGW("可选库 %s 未加载（搜索路径 %s）", name, lib_dir ? lib_dir : "(null)");
+    return NULL;
 }
 
 #define SYM(h, out, name) do { \
@@ -445,7 +455,7 @@ void* midu_engine_load(const char *lib_dir, const char *res_root,
     };
     for (size_t i = 0; i < sizeof(DEPS)/sizeof(DEPS[0]); i++) dlopen_at(lib_dir, DEPS[i], 0);
 
-    MiduHandle *h = (MiduHandle*)calloc(1, sizeof(MiduHandle));
+    BdHandle *h = (BdHandle*)calloc(1, sizeof(BdHandle));
     if (!h) { set_error("calloc handle 失败"); goto fail; }
     pthread_mutex_init(&h->lock, NULL);
     pthread_cond_init(&h->cond, NULL);
@@ -546,7 +556,7 @@ int midu_engine_synth_ex(void *hp, const char *text, int speed, int pitch,
                          int volume, int timeout_ms,
                          const char* const* keys, const char* const* vals,
                          const int* types, int n) {
-    MiduHandle *h = (MiduHandle*)hp;
+    BdHandle *h = (BdHandle*)hp;
     if (!h || !text) { set_error("synth 参数为空"); return -1; }
     if (timeout_ms <= 0) timeout_ms = 60000;
 
@@ -598,14 +608,14 @@ int midu_engine_synth_ex(void *hp, const char *text, int speed, int pitch,
 }
 
 const uint8_t* midu_engine_pcm(void *hp, int *len) {
-    MiduHandle *h = (MiduHandle*)hp;
+    BdHandle *h = (BdHandle*)hp;
     if (!h) { if (len) *len = 0; return NULL; }
     if (len) *len = (int)h->pcm_len;
     return h->pcm;
 }
 
 void midu_engine_stop(void *hp) {
-    MiduHandle *h = (MiduHandle*)hp;
+    BdHandle *h = (BdHandle*)hp;
     if (!h) return;
     pthread_mutex_lock(&h->lock);
     h->stopped = 1;
@@ -614,10 +624,10 @@ void midu_engine_stop(void *hp) {
     /* 注：rig 没验过 STOP 指令码，这里只做本地收流；下一次 synth 会重置状态。 */
 }
 
-typedef struct DestroyCtx { MiduHandle *h; } DestroyCtx;
+typedef struct DestroyCtx { BdHandle *h; } DestroyCtx;
 static void* destroy_worker(void *p) {
     DestroyCtx *c = (DestroyCtx*)p;
-    MiduHandle *h = c->h;
+    BdHandle *h = c->h;
     if (h->fn_de) h->fn_de(h->penv, h->clazz, h->engine);
     free(h->pcm);
     pthread_mutex_destroy(&h->lock);
@@ -632,7 +642,7 @@ void midu_engine_destroy(void *hp) {
     pthread_t t;
     DestroyCtx *c = (DestroyCtx*)calloc(1, sizeof(DestroyCtx));
     if (!c) return;
-    c->h = (MiduHandle*)hp;
+    c->h = (BdHandle*)hp;
     if (pthread_create(&t, NULL, destroy_worker, c) == 0) pthread_detach(t);
     else free(c);
 }

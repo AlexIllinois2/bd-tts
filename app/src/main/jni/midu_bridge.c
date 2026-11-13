@@ -4,7 +4,7 @@
  * 把 PCM 变成 byte[]。引擎的回调线程永远不进 ART，不需要跨线程 JNI。
  *
  * 注意：这里用 JNI 静态命名，函数名必须与 NativeEngine.java 的 native 方法名逐字一致
- * （Java_com_midu_tts_engine_NativeEngine_<方法名>）。曾经误写成 *_nativeInit 等，
+ * （Java_com_bd_tts_engine_NativeEngine_<方法名>）。曾经误写成 *_nativeInit 等，
  * 导致实机报 "No implementation found for ... NativeEngine.init"。
  */
 #include <jni.h>
@@ -110,7 +110,7 @@ static jbyteArray do_synth(JNIEnv* env, jlong handle, const char* text,
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_midu_tts_engine_NativeEngine_init(JNIEnv* env, jclass cls,
+Java_com_bd_tts_engine_NativeEngine_init(JNIEnv* env, jclass cls,
         jstring jLibDir, jstring jRoot, jstring jVoice, jstring jBase, jint sampleRate) {
     (void)cls;
     char *libDir = jstr_to_utf8(env, jLibDir);
@@ -131,7 +131,7 @@ Java_com_midu_tts_engine_NativeEngine_init(JNIEnv* env, jclass cls,
 
 /** 固定三参数版：保持旧调用点兼容。 */
 JNIEXPORT jbyteArray JNICALL
-Java_com_midu_tts_engine_NativeEngine_synth(JNIEnv* env, jclass cls,
+Java_com_bd_tts_engine_NativeEngine_synth(JNIEnv* env, jclass cls,
         jlong handle, jstring jText, jint speed, jint pitch, jint volume, jint timeoutMs) {
     (void)cls;
     char* text = jstr_to_utf8(env, jText);
@@ -143,7 +143,7 @@ Java_com_midu_tts_engine_NativeEngine_synth(JNIEnv* env, jclass cls,
 
 /** 通用版：额外接受 keys / values / types 三条平行数组，下发任意 tts_* 选项。 */
 JNIEXPORT jbyteArray JNICALL
-Java_com_midu_tts_engine_NativeEngine_synthEx(JNIEnv* env, jclass cls,
+Java_com_bd_tts_engine_NativeEngine_synthEx(JNIEnv* env, jclass cls,
         jlong handle, jstring jText, jint speed, jint pitch, jint volume, jint timeoutMs,
         jobjectArray jKeys, jobjectArray jVals, jintArray jTypes) {
     (void)cls;
@@ -172,25 +172,25 @@ Java_com_midu_tts_engine_NativeEngine_synthEx(JNIEnv* env, jclass cls,
 }
 
 JNIEXPORT void JNICALL
-Java_com_midu_tts_engine_NativeEngine_stop(JNIEnv* env, jclass cls, jlong handle) {
+Java_com_bd_tts_engine_NativeEngine_stop(JNIEnv* env, jclass cls, jlong handle) {
     (void)env;(void)cls;
     midu_engine_stop((void*)(intptr_t)handle);
 }
 
 JNIEXPORT void JNICALL
-Java_com_midu_tts_engine_NativeEngine_destroy(JNIEnv* env, jclass cls, jlong handle) {
+Java_com_bd_tts_engine_NativeEngine_destroy(JNIEnv* env, jclass cls, jlong handle) {
     (void)env;(void)cls;
     midu_engine_destroy((void*)(intptr_t)handle);
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_midu_tts_engine_NativeEngine_lastError(JNIEnv* env, jclass cls) {
+Java_com_bd_tts_engine_NativeEngine_lastError(JNIEnv* env, jclass cls) {
     (void)cls;
     return (*env)->NewStringUTF(env, midu_engine_last_error());
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_midu_tts_engine_NativeEngine_version(JNIEnv* env, jclass cls) {
+Java_com_bd_tts_engine_NativeEngine_version(JNIEnv* env, jclass cls) {
     (void)cls;
     return (*env)->NewStringUTF(env, midu_engine_version());
 }

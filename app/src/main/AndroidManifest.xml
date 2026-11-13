@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- JobInfo.setRequiredNetworkType(NETWORK_TYPE_ANY) 在 Android 13+ 需要此权限，
+         否则 JobScheduler.schedule() 抛 SecurityException。规则定时更新依赖它。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
@@ -12,6 +15,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 11+ 包可见性：检测 MultiTTS 是否安装（决定 so / 语音包获取链路）。 -->
+    <queries>
+        <package android:name="org.nobody.multitts" />
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -69,7 +77,7 @@
         </activity>
 
         <service
-            android:name=".MiduTtsService"
+            android:name=".BdTtsService"
             android:enabled="true"
             android:exported="true"
             android:label="@string/app_name">

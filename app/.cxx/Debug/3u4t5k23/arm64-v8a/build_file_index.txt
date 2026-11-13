@@ -1,1 +1,0 @@
-D:\weiheng\proj\midu-tts\android\app\src\main\jni\CMakeLists.txt
