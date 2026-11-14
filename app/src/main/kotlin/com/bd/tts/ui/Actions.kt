@@ -19,7 +19,9 @@ import com.bd.tts.rules.PronunciationEditor
 import com.bd.tts.rules.RuleManager
 import com.bd.tts.rules.RuleUpdateService
 import com.bd.tts.shizuku.ShizukuClient
+import com.bd.tts.sound.Knobs
 import com.bd.tts.sound.SoundProfiles
+import com.bd.tts.sound.StereoWiden
 import com.bd.tts.source.Provisioner
 import com.bd.tts.source.ResourceRoot
 import com.bd.tts.util.Diagnostics
@@ -61,7 +63,11 @@ object Actions {
                 .synthesize(text, SoundProfiles.active(c), 100, 100)
             if (cancelled(seq)) "已取消：${pcm.size} B PCM 已合成，未播放"
             else {
-                playPcm(pcm, seq)
+                // 与系统 TTS / Legado HTTP 出口一致：按当前预设做本地立体声展宽，
+                // 试听才能反映真实朗读效果。
+                val widener = StereoWiden(
+                    SoundProfiles.active(c).intOf(Knobs.K_STEREO_WIDTH), 24000)
+                playPcm(pcm, seq, widener)
                 if (cancelled(seq)) "播放已停止"
                 else "播放完成：${pcm.size} B PCM（${pcm.size / 2 / 24000.0} s）"
             }
@@ -81,8 +87,13 @@ object Actions {
         // 分块写最多再等一个 chunk（约 170 ms）就会看到取消标记自行退出。
     }
 
-    private fun playPcm(pcm: ByteArray, seq: Long) {
-        val min = AudioTrack.getMinBufferSize(24000, AudioFormat.CHANNEL_OUT_MONO,
+    private fun playPcm(pcm: ByteArray, seq: Long, widener: StereoWiden) {
+        val stereo = widener.active()
+        val data = if (stereo) widener.widen(pcm, pcm.size) else pcm
+        val channels = if (stereo) AudioFormat.CHANNEL_OUT_STEREO
+                       else AudioFormat.CHANNEL_OUT_MONO
+        val frameBytes = if (stereo) 4 else 2
+        val min = AudioTrack.getMinBufferSize(24000, channels,
             AudioFormat.ENCODING_PCM_16BIT)
         val track = AudioTrack.Builder()
             .setAudioAttributes(AudioAttributes.Builder()
@@ -91,22 +102,23 @@ object Actions {
             .setAudioFormat(AudioFormat.Builder()
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setSampleRate(24000)
-                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setChannelMask(channels).build())
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(maxOf(min, 8192)).build()
         try {
             track.play()
             // WRITE_BLOCKING 的 write 不保证一次写满；长音频不循环写会丢掉尾音。
             var off = 0
-            while (off < pcm.size && !cancelled(seq) && !Thread.currentThread().isInterrupted) {
-                val n = track.write(pcm, off, minOf(8192, pcm.size - off),
+            while (off < data.size && !cancelled(seq) && !Thread.currentThread().isInterrupted) {
+                val n = track.write(data, off, minOf(8192, data.size - off),
                     AudioTrack.WRITE_BLOCKING)
                 if (n <= 0) break
                 off += n
             }
             // 数据写完≠播完，缓冲里还有余量；直接 stop 会吃掉最后一小截。
-            val totalFrames = pcm.size / 2
-            val deadline = SystemClock.elapsedRealtime() + pcm.size / 48L + 5000L
+            val totalFrames = data.size / frameBytes
+            val bytesPerMs = 24L * frameBytes          // 24000 采样/s × 每帧字节 ÷ 1000
+            val deadline = SystemClock.elapsedRealtime() + data.size / bytesPerMs + 5000L
             while (!cancelled(seq) && track.playbackHeadPosition < totalFrames
                     && SystemClock.elapsedRealtime() < deadline) {
                 try { Thread.sleep(40) } catch (_: InterruptedException) {
@@ -124,6 +136,9 @@ object Actions {
         if (r.changed) {
             RuleManager.generationAfterChange(c, true)
             EngineController.get(c).invalidate()
+            // host2 常驻引擎按代数重启重载规则：空闲时后台预热（下次朗读零等待）；
+            // 朗读中 prewarm 会等 host2Lock，重启自然落在句界，当前句完整播完。
+            EngineController.get(c).prewarmHost2()
         }
         r.summary()
     } catch (e: Exception) { "合并失败：${e.message}" }
@@ -131,6 +146,7 @@ object Actions {
     fun checkUpdate(c: Context, done: (String) -> Unit) {
         RuleUpdateService.checkNowAsync(c) { msg ->
             EngineController.get(c).invalidate()
+            EngineController.get(c).prewarmHost2()   // 上游真变了才有效果；没变时是空操作
             done(msg)
         }
     }

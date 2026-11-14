@@ -32,7 +32,12 @@ key / title / desc / group / type(string|int|bool|double) / def / min..max / uni
 | `STATIC` | 只在 `.so` 字符串里出现，**未实测** | ❌（用户在 UI 里逐项打开） |
 
 分组：`韵律·已实测` / `韵律·比例档` / `分句与停顿` / `前端与发音覆写` /
-`情感与风格` / `音频输出` / `回调与性能` / `声音克隆`。
+`情感与风格` / `音频输出` / `音频输出·本地后处理` / `回调与性能` / `声音克隆`。
+
+其中 `音频输出·本地后处理`（`bd_` 前缀的键，如 `bd_stereo_width`）**不下发引擎**：
+`SoundProfile.toOptions()` 会跳过它们，由 app 在 PCM 出口（系统 TTS / Legado HTTP /
+试听播放三条路共用 `sound/StereoWiden.java`）做后处理。改完即生效，无需重建引擎。
+Legado 侧仍可按普通 knob 一样用 `/tts?bd_stereo_width=0` 这类参数按次覆盖。
 
 Compose 的「声音调校」页按 `Knobs.grouped()` **自动生成控件**：整数→滑块、布尔→开关、
 枚举→下拉、字符串→输入框；实验性分组默认折叠，展开后每项还有一个「下发此选项」开关。

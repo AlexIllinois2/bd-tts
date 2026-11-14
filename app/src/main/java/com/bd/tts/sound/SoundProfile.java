@@ -77,13 +77,17 @@ public final class SoundProfile {
         return clamp(Math.round(intOf(Knobs.K_PITCH) * (pitchPercent > 0 ? pitchPercent : 100) / 100f), 1, 20);
     }
     public int volume() { return clamp(intOf(Knobs.K_VOLUME), 0, 100); }
+    /** 本地立体声展宽度（0=关，单声道原样输出）。 */
+    public int stereoWidth() { return clamp(intOf(Knobs.K_STEREO_WIDTH), 0, 100); }
 
     private static int clamp(int v, int lo, int hi) { return Math.max(lo, Math.min(hi, v)); }
 
-    /** 生成要下发的扩展选项（不含基础三项；值非空即下发，调用方给的参数优先）。 */
+    /** 生成要下发的扩展选项（不含基础三项；值非空即下发，调用方给的参数优先）。
+     *  bd_ 前缀的本地后处理键不下发引擎（引擎不认识，host2 O 快照也会被污染）。 */
     public List<EngineOption> toOptions() {
         List<EngineOption> out = new ArrayList<>();
         for (Knob k : Knobs.all()) {
+            if (Knobs.isLocalOnly(k.key)) continue;
             if (k.key.equals(Knobs.K_SPEED) || k.key.equals(Knobs.K_PITCH)
                     || k.key.equals(Knobs.K_VOLUME)) continue;
             String v = str(k.key);
@@ -99,7 +103,8 @@ public final class SoundProfile {
 
     public String describe() {
         return "语速 " + intOf(Knobs.K_SPEED) + " · 音高 " + intOf(Knobs.K_PITCH)
-                + " · 音量 " + volume() + " · 扩展 " + enabledCount() + " 项";
+                + " · 音量 " + volume() + " · 扩展 " + enabledCount() + " 项"
+                + (stereoWidth() > 0 ? " · 展宽 " + stereoWidth() + "%" : "");
     }
 
     public JSONObject toJson() {

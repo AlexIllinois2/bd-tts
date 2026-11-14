@@ -19,8 +19,10 @@ import com.bd.tts.engine.PcmSink;
 import com.bd.tts.engine.Speakable;
 import com.bd.tts.rules.RuleManager;
 import com.bd.tts.rules.RuleUpdateService;
+import com.bd.tts.sound.Knobs;
 import com.bd.tts.sound.SoundProfile;
 import com.bd.tts.sound.SoundProfiles;
+import com.bd.tts.sound.StereoWiden;
 import com.bd.tts.util.Prefs;
 
 import java.util.ArrayList;
@@ -172,18 +174,34 @@ public class BdTtsService extends TextToSpeechService {
         int pit = request.getPitch() > 0 ? request.getPitch() : 100;
         SoundProfile profile = SoundProfiles.active(this);
 
+        // 本地立体声展宽（预设 bd_stereo_width，0=关）：>0 时把引擎单声道 PCM 展宽成
+        // 假立体声（Haas 反相侧链）再交给系统 AudioTrack，callback.start 声明双声道。
+        // 展宽状态跨块连续，每个 utterance 新建实例；手机单声道扬声器几乎无感。
+        final StereoWiden widener = new StereoWiden(
+                profile.intOf(Knobs.K_STEREO_WIDTH), SAMPLE_RATE);
+        final int channels = widener.active() ? 2 : 1;
+
         // 流式：第一块 PCM 到达就 start() 并开始喂 audioAvailable，不用等整章合成完。
         // host2 常驻后端逐帧回传；进程内 JNI / 一次性后端退化为「整句一块」。
         final boolean[] started = {false};
         final int max = Math.max(4096, callback.getMaxBufferSize());
         PcmSink sink = (buf, len) -> {
-            for (int off = 0; off < len; off += max) {
+            final byte[] pcm;
+            final int total;
+            if (widener.active()) {
+                pcm = widener.widen(buf, len);
+                total = pcm.length;
+            } else {
+                pcm = buf;
+                total = len;
+            }
+            for (int off = 0; off < total; off += max) {
                 if (clientStopped.get()) throw new CancellationException("客户端已 stop()");
                 if (!started[0]) {
-                    callback.start(SAMPLE_RATE, AudioFormat.ENCODING_PCM_16BIT, 1);
+                    callback.start(SAMPLE_RATE, AudioFormat.ENCODING_PCM_16BIT, channels);
                     started[0] = true;
                 }
-                callback.audioAvailable(buf, off, Math.min(max, len - off));
+                callback.audioAvailable(pcm, off, Math.min(max, total - off));
             }
         };
 

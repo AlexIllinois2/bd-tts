@@ -24,12 +24,24 @@ public final class Knobs {
     public static final String GROUP_FRONTEND  = "前端与发音覆写";
     public static final String GROUP_EMOTION   = "情感与风格";
     public static final String GROUP_OUTPUT    = "音频输出";
+    public static final String GROUP_LOCALOUT  = "音频输出 · 本地后处理";
     public static final String GROUP_CALLBACK  = "回调与性能";
     public static final String GROUP_CLONE     = "声音克隆（整条链未验）";
 
     public static final String K_SPEED   = "tts_speed";
     public static final String K_PITCH   = "tts_pitch";
     public static final String K_VOLUME  = "tts_volume";
+
+    /**
+     * 本地后处理键（bd_ 前缀）：不下发引擎，由 app 在 PCM 出口做后处理。
+     * SoundProfile.toOptions() 会跳过这类键，Legado HTTP 仍可按键覆盖。
+     */
+    public static final String K_STEREO_WIDTH = "bd_stereo_width";
+
+    /** 是否是本地后处理键（不进引擎选项）。 */
+    public static boolean isLocalOnly(String key) {
+        return key != null && key.startsWith("bd_");
+    }
 
     private static final List<Knob> ALL = new ArrayList<>();
     private static final Map<String, Knob> BY_KEY = new LinkedHashMap<>();
@@ -143,6 +155,14 @@ public final class Knobs {
         add(Knob.builder("voiceconv_volume", "变声 · 音量", GROUP_CLONE)
                 .integer(50, 0, 100).desc("voiceconv_* 一族，仅静态字符串证据。")
                 .evidence(Knob.STATIC).build());
+
+        // ---- 4) 本地后处理（不发给引擎，app 在 PCM 出口处理）------------------
+        add(Knob.builder(K_STEREO_WIDTH, "立体声展宽", GROUP_LOCALOUT)
+                .integer(35, 0, 100).unit("%")
+                .desc("0 = 原样单声道。>0 时 app 在本地把引擎单声道 PCM 展宽成假立体声"
+                        + "（Haas 反相侧链）：耳机 / 立体声喇叭听感更开阔，手机单声道扬声器"
+                        + "几乎不受影响。不发给引擎，改完下次合成即生效。")
+                .evidence(Knob.VERIFIED).build());
     }
 
     public static List<Knob> all() { return Collections.unmodifiableList(ALL); }

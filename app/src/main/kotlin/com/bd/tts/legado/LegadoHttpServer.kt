@@ -6,6 +6,7 @@ import com.bd.tts.engine.PcmSink
 import com.bd.tts.sound.Knobs
 import com.bd.tts.sound.SoundProfile
 import com.bd.tts.sound.SoundProfiles
+import com.bd.tts.sound.StereoWiden
 import com.bd.tts.util.Prefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -231,12 +232,16 @@ class LegadoHttpServer(
             ?: return text(400, "text/plain; charset=utf-8", "缺少 text / speakText 参数")
         onEvent("合成 ${plan.note}")
 
+        val widener = StereoWiden(plan.profile.intOf(Knobs.K_STEREO_WIDTH), 24000)
         val pcmOut = ByteArrayOutputStream()
         for (part in splitText(plan.text)) {
             val pcm = EngineController.get(app).synthesize(part, plan.profile, plan.rate, plan.pitch)
             pcmOut.write(pcm)
         }
-        val wav = WavEncoder.wrap(pcmOut.toByteArray())
+        // 本地立体声展宽（Haas 反相侧链）：单声道下混兼容，只是把 WAV 头改成双声道。
+        val mono = pcmOut.toByteArray()
+        val pcm = if (widener.active()) widener.widen(mono, mono.size) else mono
+        val wav = WavEncoder.wrap(pcm, channels = if (widener.active()) 2 else 1)
         LegadoState.markSynth(wav.size)
         return Resp(200, "audio/wav", wav)
     }
@@ -253,6 +258,7 @@ class LegadoHttpServer(
             return
         }
         onEvent("流式合成 ${plan.note}")
+        val widener = StereoWiden(plan.profile.intOf(Knobs.K_STEREO_WIDTH), 24000)
         val head = buildString {
             append("HTTP/1.1 200 OK\r\n")
             append("Content-Type: audio/wav\r\n")
@@ -262,12 +268,17 @@ class LegadoHttpServer(
             append("\r\n")
         }
         out.write(head.toByteArray(Charsets.US_ASCII))
-        writeChunk(out, wavStreamHeader())
+        writeChunk(out, wavStreamHeader(if (widener.active()) 2 else 1))
         var total = 0
         val sink = object : PcmSink {
             override fun onPcm(buf: ByteArray, len: Int) {
                 total += len
-                writeChunk(out, buf, len)
+                if (widener.active()) {
+                    val s = widener.widen(buf, len)   // 展宽状态跨块/跨句连续
+                    writeChunk(out, s, s.size)
+                } else {
+                    writeChunk(out, buf, len)
+                }
                 out.flush()
             }
         }
@@ -289,15 +300,15 @@ class LegadoHttpServer(
     }
 
     /** RIFF / data 长度填 0x7fffffff：流式 WAV 的常见写法，播放器读到 EOF 为止。 */
-    private fun wavStreamHeader(): ByteArray {
+    private fun wavStreamHeader(channels: Int = 1): ByteArray {
         val b = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
         b.put("RIFF".toByteArray(Charsets.US_ASCII))
         b.putInt(0x7fffffff)
         b.put("WAVE".toByteArray(Charsets.US_ASCII))
         b.put("fmt ".toByteArray(Charsets.US_ASCII))
-        b.putInt(16); b.putShort(1); b.putShort(1)          // PCM / 单声道
-        b.putInt(24000); b.putInt(48000)                     // 采样率 / 字节率
-        b.putShort(2); b.putShort(16)                        // 块对齐 / 位深
+        b.putInt(16); b.putShort(1); b.putShort(channels.toShort())   // PCM / 声道数
+        b.putInt(24000); b.putInt(24000 * channels * 2)               // 采样率 / 字节率
+        b.putShort((channels * 2).toShort()); b.putShort(16)          // 块对齐 / 位深
         b.put("data".toByteArray(Charsets.US_ASCII))
         b.putInt(0x7fffffff)
         return b.array()
