@@ -1,6 +1,7 @@
 package com.bd.tts.engine;
 
 import android.content.Context;
+import android.util.Log;
 
 import com.bd.tts.rules.RuleManager;
 import com.bd.tts.sound.SoundProfile;
@@ -65,6 +66,41 @@ public final class EngineController {
         appliedGeneration = -1;
         destroyNative();
         status = "已失效，等待下一次合成重建";
+    }
+
+    private static final String TAG = "EngineController";
+
+    /**
+     * 规则应用后的预热（异步，不阻塞 UI）：空闲时立即用新规则重启常驻引擎，
+     * 把 ~25s 的模型加载藏进两次朗读之间，下一次朗读零等待。
+     * 正在合成（host2Lock 被占）时本线程会等锁，重启自然推迟到句界之后，
+     * 朗读位置不丢、自动恢复。失败只记日志——下一次合成的 ensureRulesReloaded 会兜底。
+     * 一次性处理，重复调用无害（代数一致或 daemon 没在跑时都是空操作）。
+     */
+    public void prewarmHost2() {
+        Thread t = new Thread(() -> {
+            try {
+                synchronized (host2Lock) {
+                    Prefs p = Prefs.get(app);
+                    int gen = p.generation();
+                    if (gen <= 0 || p.host2DaemonGeneration() == gen) return;
+                    if (Prefs.BACKEND_INPROCESS.equals(p.backend())) return;   // 不用常驻引擎
+                    boolean wasRunning = Host2Daemon.reachable(app);
+                    if (!wasRunning && !Prefs.BACKEND_HOST2.equals(p.backend())) {
+                        // daemon 本来就没在跑：AUTO 用户下次合成会按需冷启（自然带新规则），
+                        // 不主动拉起白占内存。显式 host2 用户才值得预热。
+                        return;
+                    }
+                    Host2Daemon.ensureRulesReloaded(app, gen);   // 在跑则停掉
+                    Host2Daemon.ensureStarted(app, p.voice());   // 冷启 + 等端口就绪（bind 在模型加载前）
+                    status = "规则已重载（代数 " + gen + "）· " + p.voice();
+                }
+            } catch (Throwable err) {
+                Log.w(TAG, "规则预热失败（下次合成兜底重试）：" + err.getMessage());
+            }
+        }, "bd-tts-prewarm");
+        t.setDaemon(true);
+        t.start();
     }
 
     private void destroyNative() {
@@ -229,6 +265,9 @@ public final class EngineController {
             try {
                 synchronized (host2Lock) {
                     RuleManager.apply(app);   // 保证 merged 文件是最新的
+                    // 规则代数变了就停掉旧 daemon（规则 init 时读，无法热重载）；
+                    // 锁内调用保证不会打断进行中的流式合成，重启落在句界。
+                    Host2Daemon.ensureRulesReloaded(app, p.generation());
                     List<EngineOption> host2Opts = withBaseOptions(options, pitch, volume);
                     lastOptions = host2Opts.toString();
                     byte[] pcm = Host2ShellBackend.synth(app, text, p.voice(), speed, host2Opts);
@@ -281,6 +320,9 @@ public final class EngineController {
             long t0 = System.currentTimeMillis();
             synchronized (host2Lock) {
                 RuleManager.apply(app);
+                // 规则代数变了就停掉旧 daemon（规则 init 时读，无法热重载）；
+                // 锁内调用保证不会打断进行中的流式合成，重启落在句界。
+                Host2Daemon.ensureRulesReloaded(app, prefs.generation());
                 List<EngineOption> host2Opts = withBaseOptions(opts,
                         p.pitchFor(pitchPercent), p.volume());
                 lastOptions = host2Opts.toString();

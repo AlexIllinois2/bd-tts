@@ -122,6 +122,12 @@ vendor 里上游没有的键追加到末尾，最后应用用户覆盖与删除�
 - 每次安装前把上一版存成 `*.prev`，设置页「回滚上游到上一版」可一键恢复。
 - 规则内容变了 → `generation + 1` → 广播 `com.bd.tts.RULES_UPDATED` →
   `EngineController.invalidate()` → **下一次合成销毁并重建引擎**（规则是 init 时读的）。
+- **host2 常驻引擎的规则重载**：daemon 是独立进程，`invalidate()` 管不到它，改用
+  **规则代数比对**——`Prefs.host2DaemonGeneration` 记录 daemon 启动时加载的代数，
+  每次合成（host2Lock 内）发现代数落后就优雅停掉旧 daemon，下一次合成按新规则冷启。
+  - 空闲时点「应用」→ `prewarmHost2()` 后台立即重启预热，下次朗读零等待；
+  - 朗读中点「应用」→ 当前句完整播完（旧规则），重启落在句界，Legado 自动
+    继续下一句（Gap ≈ 模型加载 ~25s，位置不丢），对齐调速场景的「恢复播放」。
 - 设置页「立即检查上游更新」可手动触发；关掉自动更新会取消 Job。
 
 ---
@@ -149,4 +155,8 @@ user(设置页/SAF) ─┘        │
 <files>/midu_effective/zh-cn/frontend/g2p/mnc/unified_rule.txt
                             ↓ 引擎 init 时读
               libspeechengine.so → pinyin list after apply rules
+
+进程内 JNI：generation 变化 → invalidate → 下次合成重建引擎
+host2 daemon：generation 变化 → ensureRulesReloaded（host2Lock 内）→
+              优雅停 daemon → 下次合成冷启（空闲时 prewarmHost2 预热）
 ```

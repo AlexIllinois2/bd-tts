@@ -45,6 +45,10 @@ PY
 
 **关键工程结论**：规则文件是**引擎 init 时读**的，改规则必须**销毁并重建引擎**。
 本工程用「规则代数 generation」触发重建（`EngineController.invalidate()`）。
+host2 常驻引擎是独立进程，靠代数比对重启：合成入口（host2Lock 内）发现
+`host2DaemonGeneration` 落后就停掉旧 daemon，下次合成冷启；空闲时点「应用」
+会后台预热（`prewarmHost2`），朗读中则推迟到句界，当前句完整播完、自动续播
+（详见 `docs/RULE_FORMAT.md` §4）。
 
 ---
 

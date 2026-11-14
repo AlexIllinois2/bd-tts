@@ -148,10 +148,29 @@ public final class Host2Daemon {
     }
 
     /**
+     * 规则代数变了就停掉常驻引擎，让下一次 ensureStarted 用新规则冷启。
+     * 规则文件是引擎 init 时读的（rig 实测：Pinyin Rules Loaded 只在 init 打印，
+     * 见 docs/PRONUNCIATION_KNOBS §1），运行中无法热重载。本方法设计为在
+     * EngineController 的 host2Lock 内调用：锁串行化所有合成，「点应用时正在朗读」
+     * 会把重启推迟到句与句的间隙，当前句完整播完、朗读位置不丢。
+     * daemon 没在跑时什么都不做——冷启天然加载最新规则。
+     */
+    public static void ensureRulesReloaded(Context c, int generation) {
+        if (generation <= 0) return;
+        Prefs p = Prefs.get(c);
+        int applied = p.host2DaemonGeneration();
+        if (applied == generation) return;
+        if (!reachable(c)) return;   // 没在跑：下次冷启自然带新规则
+        Log.i(TAG, "规则代数 " + applied + " → " + generation + "，重启常驻引擎以重载规则");
+        stop(c);                     // 停掉即可；拉起与就绪等待交给 ensureStarted
+    }
+
+    /**
      * 没在跑就通过 Shizuku 以 detach 方式拉起一次，并等端口出现。
      *
      * daemon 的 --voice 只在启动时读一次，运行中无法切换。所以这里把「启动时用的音色」
      * 记在 prefs 里，音色一变就先停再起，避免用户改了设置却一直听着旧音色。
+     * 规则同理：启动成功时把当前规则代数一并记下（规则是 init 时读的）。
      * daemon 是 detach 的独立进程，app 被杀后它仍在跑，标记必须持久化而不是放静态变量。
      */
     public static void ensureStarted(Context c, String voice) throws Exception {
@@ -159,7 +178,10 @@ public final class Host2Daemon {
         String want = voice == null || voice.isEmpty() ? p.voice() : voice;
         if (reachable(c)) {
             String active = p.host2DaemonVoice();
-            if (want.equals(active)) return;
+            if (want.equals(active)) {
+                p.host2DaemonGeneration(p.generation());   // 在跑且音色匹配：视为已加载当前规则
+                return;
+            }
             Log.i(TAG, "常驻引擎音色 " + (active.isEmpty() ? "未知（外部启动）" : active)
                     + " → " + want + "，重启以生效");
             stop(c);
@@ -177,7 +199,11 @@ public final class Host2Daemon {
             startDetached(c, want);
             long deadline = System.currentTimeMillis() + 6000L;
             while (System.currentTimeMillis() < deadline) {
-                if (reachable(c)) { p.host2DaemonVoice(want); return; }
+                if (reachable(c)) {
+                    p.host2DaemonVoice(want);
+                    p.host2DaemonGeneration(p.generation());   // 冷启成功：记录已加载的规则代数
+                    return;
+                }
                 try { Thread.sleep(200); } catch (InterruptedException e) {
                     Thread.currentThread().interrupt(); break;
                 }
@@ -199,7 +225,8 @@ public final class Host2Daemon {
             throw new IllegalStateException("rig 里没有 " + bin
                     + "（跑 scripts/build_host2_serve.sh 后再 PUSH=1 推上去）");
 
-        // 规则落到 rig：daemon 每次合成从磁盘读 unified_rule.txt，改规则立即生效。
+        // 规则落到 rig：规则文件是引擎 init 时读的（无法热重载），所以「改规则生效」
+        // 靠停掉旧 daemon、下次合成按新规则冷启——见 EngineController 的代数比对。
         // 先尽力做资源供给（用户目录的 zip/APK → rig）；rig/midu 已有 licbag 的老
         // 配置在供给失败时仍允许拉起，缺什么会在合成错误里体现。
         try {

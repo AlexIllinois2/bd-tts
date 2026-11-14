@@ -63,6 +63,13 @@ public final class Prefs {
      */
     public String host2DaemonVoice(){ return sp.getString("host2_daemon_voice", ""); }
     public Prefs host2DaemonVoice(String v){ sp.edit().putString("host2_daemon_voice", v).apply(); return this; }
+    /**
+     * 常驻 daemon 启动时加载的规则代数（规则文件是引擎 init 时读的，运行中改不了）。
+     * 与 generation() 不一致时 EngineController 会停掉旧 daemon，下次合成按新规则冷启。
+     * 0 表示当前 daemon 的规则代数未知（外部拉起 / 尚未记录）。
+     */
+    public int host2DaemonGeneration()    { return sp.getInt("host2_daemon_generation", 0); }
+    public Prefs host2DaemonGeneration(int v){ sp.edit().putInt("host2_daemon_generation", v).apply(); return this; }
 
     public String voice()       { return sp.getString("voice", DEFAULT_VOICE); }
     public Prefs voice(String v){ sp.edit().putString("voice", v).apply(); return this; }
