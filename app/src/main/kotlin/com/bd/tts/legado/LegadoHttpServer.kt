@@ -7,6 +7,7 @@ import com.bd.tts.sound.Knobs
 import com.bd.tts.sound.SoundProfile
 import com.bd.tts.sound.SoundProfiles
 import com.bd.tts.sound.StereoWiden
+import com.bd.tts.ui.Actions
 import com.bd.tts.util.Prefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,6 +42,9 @@ import kotlin.math.roundToInt
  *   pitch                            音高百分比，100=正常
  *   tone | toneId | profile          发言人 toneID（= 本地预设 id）
  *   emotion | tag                    情绪名或 [情绪标签]
+ *   rules                            覆盖全局规则开关：on/off、1/0、true/false
+ *                                   （短路全部规则，不改各规则文件自己的开关；覆盖后持续生效，
+ *                                   直到再次传参或在规则页改回）
  *   任意 tts_* / voiceconv_*          直接覆盖对应 Knob（受实验性开关约束）
  */
 class LegadoHttpServer(
@@ -187,6 +191,22 @@ class LegadoHttpServer(
         args.putAll(parseQuery(query))
         args.putAll(parseBody(contentType, body))
 
+        // 第三方传参覆盖「整体规则禁用/启用」：与规则页的一键开关同一份状态，
+        // 短路时不改任何规则文件自己的 enabled。HTTP 工作线程里同步执行，
+        // setRulesEnabled 内部会合并规则、bump 代数并让引擎下次合成重载。
+        val rulesArg = args["rules"] ?: args["rulesEnabled"] ?: args["enableRules"]
+        if (rulesArg != null) {
+            val on = when (rulesArg.trim().lowercase(Locale.ROOT)) {
+                "1", "on", "true", "yes", "enable", "enabled" -> true
+                "0", "off", "false", "no", "disable", "disabled" -> false
+                else -> null
+            }
+            if (on == null) onEvent("× 忽略无法识别的 rules 参数：$rulesArg")
+            else if (on != Prefs.get(app).rulesEnabled()) {
+                onEvent("规则总开关 → ${if (on) "启用" else "禁用"}：${Actions.setRulesEnabled(app, on)}")
+            }
+        }
+
         val text = (args["text"] ?: args["speakText"] ?: "").trim()
         if (text.isEmpty()) return null
 
@@ -326,6 +346,7 @@ class LegadoHttpServer(
             .put("engine", EngineController.get(app).status())
             .put("backend", EngineController.get(app).lastBackend())
             .put("activeProfile", SoundProfiles.active(app).name)
+            .put("rulesEnabled", Prefs.get(app).rulesEnabled())
             .put("knobs", Knobs.all().size)
             .put("profiles", SoundProfiles.all(app).size)
             .put("options", opts)

@@ -34,9 +34,15 @@ public final class Prefs {
     public Prefs customPath(String v){ sp.edit().putString("custom_path", v).apply(); return this; }
 
     /**
-     * 用户手动选择的厂商 so 来源（MultiTTS apk / 内含 lib/arm64-v8a 的 zip /
-     * 一个或多个 .so 文件 / 包含它们的文件夹）。多个 URI 用 \n 分隔；
-     * content:// 文档用 SAF 读，普通路径直接读。
+     * 用户手动选择的 MultiTTS apk（单个 URI / 普通路径）。本 app 自己从
+     * apk 的 lib/arm64-v8a 提取厂商 so，用户不再手动挑 .so 文件。
+     */
+    public String multittsApkPath()      { return sp.getString("multitts_apk_path", ""); }
+    public Prefs multittsApkPath(String v){ sp.edit().putString("multitts_apk_path", v == null ? "" : v).apply(); return this; }
+
+    /**
+     * 旧版「手动选择 so 来源」遗留值，仅供老用户过渡：读第一个条目当 apk 用，
+     * 新界面不再写入。soPath("") 用来在用户重新选 apk 时清掉它。
      */
     public String soPath()      { return sp.getString("so_path", ""); }
     public Prefs soPath(String v){ sp.edit().putString("so_path", v == null ? "" : v).apply(); return this; }
@@ -117,6 +123,21 @@ public final class Prefs {
 
     public String ruleUrl()     { return sp.getString("rule_url", ""); }
     public Prefs ruleUrl(String v){ sp.edit().putString("rule_url", v).apply(); return this; }
+
+    /**
+     * 规则文件列表（本地 / 网络、顺序、各自开关）的 JSON 快照。
+     * 空串表示首次启动：规则文件层会退化出一条「用户规则」指向旧 user_rules.txt，
+     * 老用户已写过的规则不会丢。
+     */
+    public String ruleSources() { return sp.getString("rule_sources", ""); }
+    public Prefs ruleSources(String v){ sp.edit().putString("rule_sources", v == null ? "" : v).apply(); return this; }
+
+    /**
+     * 规则总开关：关闭时合并层短路成空规则（各规则文件自己的开关保持不变）。
+     * 第三方 HTTP 调用可用参数覆盖它。
+     */
+    public boolean rulesEnabled(){ return sp.getBoolean("rules_enabled", true); }
+    public Prefs rulesEnabled(boolean v){ sp.edit().putBoolean("rules_enabled", v).apply(); return this; }
 
     public String etag(String key){ return sp.getString("etag_" + key, ""); }
     public Prefs etag(String key, String v){ sp.edit().putString("etag_" + key, v == null ? "" : v).apply(); return this; }

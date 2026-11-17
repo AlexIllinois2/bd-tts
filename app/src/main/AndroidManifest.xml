@@ -104,6 +104,17 @@
                 android:value="本地 HTTP 朗读引擎，供 Legado 等阅读应用在本机调用离线 TTS" />
         </service>
 
+        <!-- 规则页「文本编辑」把 files/rules 下的规则文件交给系统编辑器打开。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

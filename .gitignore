@@ -6,6 +6,8 @@ app/.cxx/
 local.properties
 *.iml
 .idea/
+__pycache__/
+*.pyc
 
 # prepare_vendor.py 生成的厂商原件（不外传、不入库）
 app/src/main/jniLibs/arm64-v8a/*.so

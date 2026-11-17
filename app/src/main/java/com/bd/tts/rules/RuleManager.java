@@ -8,6 +8,9 @@ import com.bd.tts.util.Prefs;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /** 三份规则文件的落点、合并、原子生效与回滚。 */
 public final class RuleManager {
@@ -78,25 +81,55 @@ public final class RuleManager {
         public final String sha;
         public final boolean changed;
         public final String enginePath;
-        Report(Rules.Result r, String sha, boolean changed, String enginePath) {
+        public final boolean disabled;
+        public final int sourceCount;
+        Report(Rules.Result r, String sha, boolean changed, String enginePath,
+               boolean disabled, int sourceCount) {
             result = r; this.sha = sha; this.changed = changed; this.enginePath = enginePath;
+            this.disabled = disabled; this.sourceCount = sourceCount;
         }
-        public String summary() { return Rules.summary(result) + "  sha=" + sha.substring(0, 12); }
+        public String summary() {
+            if (disabled) return "规则已整体禁用（短路）· 各规则文件开关保持不变";
+            return Rules.summary(result) + " · 规则文件 " + sourceCount + " 份"
+                    + "  sha=" + sha.substring(0, 12);
+        }
     }
 
-    /** 合并三份规则 → 原子写到「引擎真正读的那个路径」。 */
+    /** 合并「N 份规则文件 + 上游 + vendor」→ 原子写到引擎真正读的路径。 */
     public static synchronized Report apply(Context c) throws Exception {
         ensureSeed(c);
-        String vendor = textOrEmpty(vendorFile(c));
-        String upstream = textOrEmpty(upstreamFile(c));
-        String user = textOrEmpty(userFile(c));
+        Prefs prefs = Prefs.get(c);
+        boolean disabled = !prefs.rulesEnabled();
+        Rules.Result r;
+        byte[] bytes;
+        String sha;
+        int sourceCount = 0;
 
-        Rules.Result r = Rules.merge(vendor, upstream, user);
-        byte[] bytes = r.text().getBytes(StandardCharsets.UTF_8);
-        String sha = Io.sha256(bytes);
+        if (disabled) {
+            // 一键短路：不碰任何规则文件自己的 enabled，只把引擎规则写成注释。
+            r = Rules.mergeOrdered(Collections.<String>emptyList());
+            bytes = "# 发音规则已整体禁用（短路），各规则文件开关保持不变\n"
+                    .getBytes(StandardCharsets.UTF_8);
+            sha = "rules-disabled";
+        } else {
+            List<RuleFiles.Source> sources = RuleFiles.list(c);
+            List<String> layers = new ArrayList<>();   // 越靠前优先级越高
+            for (RuleFiles.Source s : sources) {
+                if (s.getEnabled()) layers.add(RuleFiles.text(c, s));
+            }
+            sourceCount = layers.size();
+            layers.add(textOrEmpty(upstreamFile(c)));
+            layers.add(textOrEmpty(vendorFile(c)));
+            r = Rules.mergeOrdered(layers);
+            bytes = r.text().getBytes(StandardCharsets.UTF_8);
+            sha = Io.sha256(bytes);
+        }
+
         Io.atomicWrite(mergedFile(c), bytes);
         Io.atomicWrite(new File(dir(c), "merge_report.txt"),
-                Rules.summary(r) + "\nsha=" + sha + "\n\n" + String.join("\n", r.conflicts) + "\n");
+                (disabled ? "规则已整体禁用（短路）" : Rules.summary(r))
+                        + "\n文件数=" + sourceCount + "\nsha=" + sha + "\n\n"
+                        + String.join("\n", r.conflicts) + "\n");
 
         File engine = new File(ResourceRoot.dir(c), ResourceRoot.RULE_REL);
         Io.ensureDir(engine.getParentFile());
@@ -106,7 +139,7 @@ public final class RuleManager {
         String old = shaFile.isFile() ? Io.readUtf8(shaFile).trim() : "";
         boolean changed = !old.equals(sha);
         Io.atomicWrite(shaFile, sha);
-        return new Report(r, sha, changed, engine.getAbsolutePath());
+        return new Report(r, sha, changed, engine.getAbsolutePath(), disabled, sourceCount);
     }
 
     /** 更新任务/用户保存后调用：规则变了就换代数，EngineController 据此重建引擎。 */

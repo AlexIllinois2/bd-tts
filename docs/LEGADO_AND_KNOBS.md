@@ -31,6 +31,24 @@ key / title / desc / group / type(string|int|bool|double) / def / min..max / uni
 | `RIG_ENV` | rig 的 `host2.c` env 里验过键存在 | ✅ |
 | `STATIC` | 只在 `.so` 字符串里出现，**未实测** | ❌（用户在 UI 里逐项打开） |
 
+### 2026-11-17 真机 A/B 实测：无效项已从声音页隐藏
+
+用 `scripts/probe_knobs.py` 走 App 本地 HTTP `/tts`，固定文本/基础参数，
+对每个高级项取两个极端值各合成两次，比较 WAV 时长与能量包络（引擎不钉种子，
+只看宏观量）；可疑项再用长文本/英文文本针对性复测。结论：
+
+| 项 | 结论 | 依据 |
+|---|---|---|
+| `tts_silence_duration` | ✅ 有效 | 0→2000ms 使句尾多 2.6 秒留白 |
+| `tts_sub_sentence_length` | ✅ 有效 | 长文本 0→8 字改变停顿与总时长（大值>文本长度时无效） |
+| `tts_emotion` | ✅ 有效 | sad/angry 改变韵律；happy 接近默认 |
+| `bd_stereo_width` | ✅ 有效 | 本地后处理，非引擎键 |
+| 其余 22 项（比例档、分句开关、前端覆写、淡入淡出、输出编码/压缩/落盘、回调、并发、克隆、变声等） | ❌ 无效 | A/B 时长/能量/包络完全一致，引擎无响应；部分本工程链路不用 |
+
+无效项以 `Knob.visible=false` 标记：仍留在 `Knobs` 表（历史预设/HTTP 覆盖不受影响），
+但 `Knobs.grouped(false)` 在声音页过滤掉它们。要复测可跑
+`python3 scripts/probe_knobs.py --repeat 2`（需先启动本地朗读服务并 `adb forward tcp:8765 tcp:8765`）。
+
 分组：`韵律·已实测` / `韵律·比例档` / `分句与停顿` / `前端与发音覆写` /
 `情感与风格` / `音频输出` / `音频输出·本地后处理` / `回调与性能` / `声音克隆`。
 
@@ -107,6 +125,7 @@ fake_jni.c: midu_engine_synth_ex
 | `pitch` | 音高百分比，100 = 正常 |
 | `tone` / `toneId` / `profile` | 发言人 toneID，即本地预设 id |
 | `emotion` / `tag` | 情绪名或 `[情绪标签]` |
+| `rules` | 覆盖全局规则开关：`on/off`、`1/0`、`true/false`。短路全部规则但不改各规则文件自己的开关；覆盖持续生效直到再次传参或在规则页改回。`/health` 的 `rulesEnabled` 可读当前值 |
 | 任意 `tts_*` / `voiceconv_*` | 直接覆盖对应 Knob；`STATIC` 项受「允许实验性覆盖」开关约束 |
 
 ### 内联拼音（`[[字词|pin1 yin1]]`，2026-11-13 真机实测）

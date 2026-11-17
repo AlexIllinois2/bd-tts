@@ -6,8 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -31,7 +30,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.vector.ImageVector
-import com.bd.tts.ui.pages.PronunciationPage
 import com.bd.tts.ui.pages.RulesPage
 import com.bd.tts.ui.pages.SoundPage
 import com.bd.tts.ui.pages.SourcePage
@@ -54,12 +52,12 @@ private data class Tab(val title: String, val short: String, val icon: ImageVect
 @Composable
 private fun AppScaffold() {
     val tabs = listOf(
+        Tab("首页", "首页", Icons.Default.Home),
         Tab("声音调校", "声音", Icons.Default.Settings),
-        Tab("词语读音调整", "读音", Icons.Default.Edit),
-        Tab("发音规则", "规则", Icons.Default.List),
-        Tab("语音源 · 诊断", "诊断", Icons.Default.Info)
+        Tab("发音规则", "规则", Icons.Default.List)
     )
-    // 首页已移除，默认落在「声音」页（tabs[0]）。
+    // 原「语音源 · 诊断」页改名首页并置顶；发音页从底部导航移除，
+    // 改为规则页里「表单编辑」的弹窗入口。
     var tab by remember { mutableIntStateOf(0) }
     var refresh by remember { mutableIntStateOf(0) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -96,10 +94,9 @@ private fun AppScaffold() {
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                0 -> SoundPage(refresh, toast)
-                1 -> PronunciationPage(refresh, toast)
-                2 -> RulesPage(refresh, toast)
-                else -> SourcePage(refresh, toast)
+                0 -> SourcePage(refresh, toast)
+                1 -> SoundPage(refresh, toast)
+                else -> RulesPage(refresh, toast)
             }
         }
     }

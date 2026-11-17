@@ -8,6 +8,7 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -16,6 +17,7 @@ import com.bd.tts.SettingsActivity
 import com.bd.tts.engine.EngineController
 import com.bd.tts.engine.Host2Daemon
 import com.bd.tts.rules.PronunciationEditor
+import com.bd.tts.rules.RuleFiles
 import com.bd.tts.rules.RuleManager
 import com.bd.tts.rules.RuleUpdateService
 import com.bd.tts.shizuku.ShizukuClient
@@ -142,6 +144,100 @@ object Actions {
         }
         r.summary()
     } catch (e: Exception) { "合并失败：${e.message}" }
+
+    // ------------------------------------------------------- 规则文件（多份、可排序）
+
+    data class RuleFileView(
+        val id: String, val name: String, val spec: String,
+        val network: Boolean, val enabled: Boolean,
+        val lines: Int, val bytes: Long
+    )
+
+    /** 规则页列表用：同步读偏好 + 读各文件正文，量很小。 */
+    fun listRuleFiles(c: Context): List<RuleFileView> = RuleFiles.list(c).map { s ->
+        val text = RuleFiles.text(c, s)
+        RuleFileView(s.id, s.name, s.spec, s.network, s.enabled,
+            PronunciationEditor.countRules(text), text.toByteArray(Charsets.UTF_8).size.toLong())
+    }
+
+    fun ruleFileText(c: Context, id: String): String = RuleFiles.textById(c, id)
+
+    fun displayName(c: Context, uri: Uri): String = RuleFiles.displayName(c, uri)
+
+    /** 总开关：短路全部规则，但不动各文件自己的 enabled。 */
+    fun setRulesEnabled(c: Context, on: Boolean): String {
+        val p = Prefs.get(c)
+        if (p.rulesEnabled() == on) return "规则总开关已是${if (on) "启用" else "禁用"}状态"
+        p.rulesEnabled(on)
+        return applyRules(c)
+    }
+
+    fun setRulesEnabled(c: Context, on: Boolean, done: (String) -> Unit) = bg {
+        val msg = setRulesEnabled(c, on)
+        ui { done(msg) }
+    }
+
+    fun addLocalRuleFile(c: Context, uri: Uri, name: String, done: (String) -> Unit) = bg {
+        val msg = try {
+            val s = RuleFiles.addLocal(c, uri, name)
+            "已添加「${s.name}」· ${applyRules(c)}"
+        } catch (e: Exception) { "添加失败：${e.message}" }
+        ui { done(msg) }
+    }
+
+    fun addNetworkRuleFile(c: Context, url: String, done: (String) -> Unit) = bg {
+        val msg = try {
+            val s = RuleFiles.addNetwork(c, url)
+            "已下载并添加「${s.name}」· ${applyRules(c)}"
+        } catch (e: Exception) { "添加网络规则失败：${e.message}" }
+        ui { done(msg) }
+    }
+
+    fun removeRuleFile(c: Context, id: String, done: (String) -> Unit) = bg {
+        val msg = try {
+            RuleFiles.remove(c, id)
+            "已移除规则文件 · ${applyRules(c)}"
+        } catch (e: Exception) { "移除失败：${e.message}" }
+        ui { done(msg) }
+    }
+
+    fun moveRuleFile(c: Context, from: Int, to: Int, done: (String) -> Unit) = bg {
+        val msg = try {
+            RuleFiles.move(c, from, to)
+            if (from == to) "位置未变" else "顺序已保存 · ${applyRules(c)}"
+        } catch (e: Exception) { "排序失败：${e.message}" }
+        ui { done(msg) }
+    }
+
+    fun setRuleFileEnabled(c: Context, id: String, on: Boolean, done: (String) -> Unit) = bg {
+        val msg = try {
+            RuleFiles.setEnabled(c, id, on)
+            "已${if (on) "启用" else "禁用"}该文件 · ${applyRules(c)}"
+        } catch (e: Exception) { "切换失败：${e.message}" }
+        ui { done(msg) }
+    }
+
+    /** 网络文件重新下载；本地文件是 no-op。 */
+    fun refreshRuleFile(c: Context, id: String, done: (String) -> Unit) = bg {
+        val msg = try {
+            val s = RuleFiles.find(c, id) ?: throw IllegalStateException("文件已不存在")
+            if (!s.network) "本地文件无需下载"
+            else {
+                val n = RuleFiles.download(c, s).toByteArray(Charsets.UTF_8).size
+                "已更新网络规则（$n B）· ${applyRules(c)}"
+            }
+        } catch (e: Exception) { "更新失败：${e.message}" }
+        ui { done(msg) }
+    }
+
+    /** 外部编辑器保存后重新读取并合并；没变化也会重算一次，保证顺序/总开关一致。 */
+    fun reloadRuleFile(c: Context, id: String, done: (String) -> Unit) = bg {
+        val msg = try {
+            if (RuleFiles.find(c, id) == null) throw IllegalStateException("文件已不存在")
+            "已读取编辑结果 · ${applyRules(c)}"
+        } catch (e: Exception) { "读取失败：${e.message}" }
+        ui { done(msg) }
+    }
 
     fun checkUpdate(c: Context, done: (String) -> Unit) {
         RuleUpdateService.checkNowAsync(c) { msg ->
@@ -279,15 +375,15 @@ object Actions {
         val added: Int, val duplicates: Int, val status: RuleStatus
     )
 
-    /** 状态条：用户规则文件的真实行数 / 字节 / 修改时间 + 规则代数 + 合并结果条数。 */
-    fun ruleStatus(c: Context): RuleStatus = try {
-        val text = RuleManager.userText(c)      // 顺带 ensureSeed，保证文件存在
-        val f = RuleManager.userFile(c)
+    /** 状态条：目标规则文件的真实行数 / 字节 / 修改时间 + 规则代数 + 合并结果条数。 */
+    fun ruleStatus(c: Context, targetId: String? = null): RuleStatus = try {
+        val text = if (targetId == null) RuleManager.userText(c) else RuleFiles.textById(c, targetId)
+        val f = if (targetId == null) RuleManager.userFile(c) else RuleFiles.fileById(c, targetId)
         val merged = try { RuleManager.mergedText(c) } catch (_: Exception) { "" }
         RuleStatus(
             PronunciationEditor.countRules(text),
-            if (f.isFile) f.length() else 0L,
-            if (f.isFile) f.lastModified() else 0L,
+            if (f != null && f.isFile) f.length() else 0L,
+            if (f != null && f.isFile) f.lastModified() else 0L,
             Prefs.get(c).generation(),
             PronunciationEditor.countRules(merged)
         )
@@ -298,30 +394,43 @@ object Actions {
      * 原子写进引擎资源根 → 规则代数 +1 → 重建引擎。耗时操作放工作线程，回调切主线程。
      * 对齐工具页 app.js 的 applyPending()：即使内容区为空也重新整理一次。
      */
-    fun appendPendingRules(c: Context, pending: List<String>, done: (ApplyResult) -> Unit) = bg {
+    fun appendPendingRules(c: Context, pending: List<String>, done: (ApplyResult) -> Unit,
+                           targetId: String? = null) = bg {
         val result = try {
-            val before = RuleManager.userText(c)
+            val before = if (targetId == null) RuleManager.userText(c)
+                         else RuleFiles.textById(c, targetId)
             val r = PronunciationEditor.append(before, pending)
-            if (r.added.isNotEmpty()) RuleManager.setUserText(c, r.text)
+            if (r.added.isNotEmpty()) {
+                if (targetId == null) {
+                    RuleManager.setUserText(c, r.text)
+                } else {
+                    val src = RuleFiles.find(c, targetId)
+                        ?: throw IllegalStateException("目标规则文件已不存在")
+                    RuleFiles.writeText(c, src, r.text)
+                }
+            }
             val merge = applyRules(c)
-            val st = ruleStatus(c)
+            val st = ruleStatus(c, targetId)
             ApplyResult(true,
                 "已应用：新增 ${r.added.size} 条，重复跳过 ${r.duplicates.size} 条 · " +
-                        "用户规则 ${st.lines} 行 / ${st.bytes} B · 合并 ${st.mergedLines} 条 · " +
+                        "目标文件 ${st.lines} 行 / ${st.bytes} B · 合并 ${st.mergedLines} 条 · " +
                         "规则代数 ${st.generation} · $merge",
                 r.added.size, r.duplicates.size, st)
         } catch (e: Exception) {
-            ApplyResult(false, "应用失败：${e.message}", 0, 0, ruleStatus(c))
+            ApplyResult(false, "应用失败：${e.message}", 0, 0, ruleStatus(c, targetId))
         }
         ui { done(result) }
     }
 
     /** 查找已有读音：用户规则优先，其次合并结果（含上游 / vendor）。 */
     fun findRules(c: Context, word: String,
-                  done: (List<PronunciationEditor.Hit>) -> Unit) = bg {
+                  done: (List<PronunciationEditor.Hit>) -> Unit,
+                  targetId: String? = null) = bg {
         val hits = try {
+            val targetText = if (targetId == null) RuleManager.userText(c)
+                             else RuleFiles.textById(c, targetId)
             PronunciationEditor.findHits(
-                RuleManager.userText(c),
+                targetText,
                 try { RuleManager.mergedText(c) } catch (_: Exception) { "" },
                 word)
         } catch (_: Exception) { emptyList() }

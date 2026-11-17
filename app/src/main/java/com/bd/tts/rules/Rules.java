@@ -197,62 +197,63 @@ public final class Rules {
     // ---------------------------------------------------------------- 合并
 
     public static Result merge(String vendorText, String upstreamText, String userText) {
-        Parsed vendor = parse(vendorText);
-        Parsed upstream = parse(upstreamText);
-        Parsed user = parse(userText);
+        return mergeOrdered(Arrays.asList(userText, upstreamText, vendorText));
+    }
 
-        Set<String> blocked = new HashSet<>();
-        blocked.addAll(user.removals);
-
-        List<Rule> base = new ArrayList<>();
-        // 1) 上游产物是「vendor + 补丁」整理后的完整有序结果，优先作为基底，
-        //    这样能保留上游 organizer.ts 的分组/排序，也天然继承它的「移除」语义。
-        if (!upstream.adds.isEmpty()) base.addAll(upstream.adds);
-        else base.addAll(vendor.adds);
-
-        // 2) 补回 vendor 里上游没有的条目（换过厂商语音包时有用），但上游移除过的不补。
-        Map<String, Rule> keys = new LinkedHashMap<>();
-        for (Rule r : base) keys.put(r.key(), r);
-        for (Rule r : vendor.adds) {
-            if (keys.containsKey(r.key())) continue;
-            if (blocked.contains(r.canonical())) continue;
-            base.add(r);
-            keys.put(r.key(), r);
+    /**
+     * 任意数量的规则层：第 0 项优先级最高，最后一项优先级最低（vendor 种子）。
+     *
+     * 低层先当基底；逐层往上：本层的「移除 / @删除」先作用于下面所有层，
+     * 本层「新增」同键就地覆盖低层（保序）、新键追加。等价于原来的
+     * vendor / 上游 / 用户三层合并，但层数不再写死。
+     */
+    public static synchronized Result mergeOrdered(List<String> layers) {
+        List<Parsed> parsed = new ArrayList<>();
+        for (String t : layers) parsed.add(parse(t));
+        if (parsed.isEmpty()) {
+            return new Result(new ArrayList<>(), new ArrayList<>(), 0, 0, 0, 0);
         }
 
-        // 3) 用户移除：精确行 + 整词删除，作用于所有低层。
-        List<Rule> kept = new ArrayList<>();
-        for (Rule r : base) {
-            if (blocked.contains(r.canonical())) continue;
-            if (user.removeWords.contains(r.word)) continue;
-            kept.add(r);
-        }
-
-        // 4) 用户自定义：同键就地覆盖（保序），新键追加。
+        List<Rule> kept = new ArrayList<>(parsed.get(parsed.size() - 1).adds);
         List<String> conflicts = new ArrayList<>();
-        for (Rule u : user.adds) {
-            int hit = -1;
-            for (int i = 0; i < kept.size(); i++) {
-                if (kept.get(i).key().equals(u.key())) { hit = i; break; }
+        // 从倒数第二层往上走：每层都先删再加/覆盖。
+        for (int i = parsed.size() - 2; i >= 0; i--) {
+            Parsed layer = parsed.get(i);
+            List<Rule> next = new ArrayList<>();
+            for (Rule r : kept) {
+                if (layer.removals.contains(r.canonical())) continue;
+                if (layer.removeWords.contains(r.word)) continue;
+                next.add(r);
             }
-            if (hit >= 0) {
-                Rule old = kept.get(hit);
-                conflicts.add("用户覆盖 " + u.word + " [" + String.join(" ", u.conds) + "]  "
-                        + String.join(" ", old.pron) + " → " + String.join(" ", u.pron));
-                kept.set(hit, u);
-            } else {
-                kept.add(u);
+            Map<String, Integer> index = new LinkedHashMap<>();
+            for (int k = 0; k < next.size(); k++) index.put(next.get(k).key(), k);
+            for (Rule u : layer.adds) {
+                Integer hit = index.get(u.key());
+                if (hit != null) {
+                    Rule old = next.get(hit);
+                    conflicts.add("第 " + (i + 1) + " 层覆盖 " + u.word
+                            + " [" + String.join(" ", u.conds) + "]  "
+                            + String.join(" ", old.pron) + " → " + String.join(" ", u.pron));
+                    next.set(hit, u);
+                } else {
+                    index.put(u.key(), next.size());
+                    next.add(u);
+                }
             }
+            kept = next;
         }
 
-        // 5) 按规范化整行去重（保留首次出现）。
+        // 按规范化整行去重（保留首次出现 = 高优先级层的位置）。
         Set<String> seen = new LinkedHashSet<>();
         List<String> lines = new ArrayList<>();
         for (Rule r : kept) {
             if (seen.add(r.canonical())) lines.add(r.raw);
         }
-        return new Result(lines, conflicts,
-                vendor.adds.size(), upstream.adds.size(), user.adds.size(), lines.size());
+        int vendorCount = parsed.get(parsed.size() - 1).adds.size();
+        int upstreamCount = parsed.size() >= 2 ? parsed.get(parsed.size() - 2).adds.size() : 0;
+        int userCount = 0;
+        for (int i = 0; i + 2 < parsed.size(); i++) userCount += parsed.get(i).adds.size();
+        return new Result(lines, conflicts, vendorCount, upstreamCount, userCount, lines.size());
     }
 
     /** 下载产物落盘前的合法性闸：不能把坏文件当成规则集。 */

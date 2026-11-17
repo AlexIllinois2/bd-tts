@@ -25,10 +25,10 @@ import androidx.documentfile.provider.DocumentFile;
  *       语音包优先取 apk 内嵌包（按需解压 rig/midu），没有则直读其数据目录
  *       Android/data/org.nobody.multitts/.../midu。
  *   有 MultiTTS 无 Shizuku：先尝试直接读安装的 apk（低版本 / 部分 ROM 可行），
- *       读不动让用户手动选 apk / so；语音包由用户本地选 zip 或文件夹。
- *   无 MultiTTS：so 由用户本地选（apk / zip / 一个或多个 .so / 文件夹）；
- *       icu_shim / libc++_shared 等可公开、无版权风险的库已随本 APK 内置；
- *       语音包由用户本地选 zip 或文件夹。
+ *       读不动让用户在首页手动选 MultiTTS apk；语音包由用户本地选 zip 或文件夹。
+ *   无 MultiTTS：so 由用户在首页手动选 MultiTTS apk，本类自动扫 lib/arm64-v8a
+ *       提取厂商闭包（用户不用再挑 .so）；icu_shim / libc++_shared 等无版权风险的
+ *       库已随本 APK 内置；语音包由用户本地选 zip 或文件夹。
  *
  * 目录形态：文件夹本身（或一层子目录）是 midu 资源根（有 speech_license.licbag）→
  * 直接当来源；Shizuku 在场时还支持文件夹里放 zip/apk 按需解压到 rig。
@@ -77,7 +77,8 @@ public final class Provisioner {
     /** 供给缓存键：音色 + 来源相关偏好，任一变化立即重新供给。 */
     private static String cacheKey(Context c, String voice) {
         Prefs p = Prefs.get(c);
-        return voice + "|" + p.customPath() + "|" + p.soPath() + "|" + p.multittsRoot();
+        return voice + "|" + p.customPath() + "|" + p.multittsApkPath() + "|"
+                + p.soPath() + "|" + p.multittsRoot();
     }
 
     /**
@@ -199,7 +200,7 @@ public final class Provisioner {
         if (svc.stat(root + "/speech_license.licbag").startsWith("-1:"))
             throw new IllegalStateException("MultiTTS apk 里没有语音包，且 " + root
                     + " 下没有 speech_license.licbag。\n请先在 MultiTTS 里下载离线语音包，"
-                    + "或在「语音源 · 诊断」页手动选择语音包 zip / 文件夹");
+                    + "或在首页手动选择语音包 zip / 文件夹");
         out.notes.add("语音包直读 MultiTTS 数据目录 " + root);
         out.source = new ShizukuVoiceSource(root, svc);
     }
@@ -213,7 +214,7 @@ public final class Provisioner {
         String custom = p.customPath();
         if (custom == null || custom.trim().isEmpty())
             throw new IllegalStateException(
-                    "未设置语音来源：请在「语音源 · 诊断」页选择语音包 zip 或文件夹");
+                    "未设置语音来源：请在首页选择语音包 zip 或文件夹");
 
         // SAF 树只支持目录形态（现有 Directory 来源），zip 需要普通路径 + Shizuku。
         if (custom.startsWith("content://")) {
@@ -292,7 +293,7 @@ public final class Provisioner {
         } else {
             boolean haveEngine = !svc.stat(rig + "/lib/libspeechengine.so").startsWith("-1:");
             out.notes.add(haveEngine ? "rig/lib 已有厂商 so"
-                    : "没找到含 lib/arm64-v8a/*.so 的 apk/zip：可在「语音源 · 诊断」页手动选择 so 来源");
+                    : "没找到含 lib/arm64-v8a/*.so 的 apk：可在首页手动选择 MultiTTS apk");
         }
         pushShipLibs(c, svc, rig, out.notes);
         mirrorVendorSo(c, svc, rig, out.notes);
@@ -332,29 +333,31 @@ public final class Provisioner {
         out.source = resolveVoiceLocal(c, p, voice, out.notes);
     }
 
-    /** so 链路（无 Shizuku）：用户选的 so 来源 → files/midu_native；MultiTTS 在场先试直读。 */
+    /** so 链路（无 Shizuku）：用户选的 MultiTTS apk → 自动提 so 到 files/midu_native；MultiTTS 在场先试直读。 */
     private static void ensureSoLocal(Context c, Prefs p, List<String> notes) throws Exception {
         File dir = nativeDir(c);
         if (!dir.isDirectory() && !dir.mkdirs()) throw new IllegalStateException("mkdirs " + dir);
 
-        String spec = p.soPath() == null ? "" : p.soPath().trim();
+        // 新界面只选 MultiTTS apk，app 自己从 apk 提 so；soPath 是老版本遗留值，
+        // 只在用户还没选过 apk 时兜底读第一条，避免老用户升级后直接失声。
+        String spec = p.multittsApkPath() == null ? "" : p.multittsApkPath().trim();
+        if (spec.isEmpty()) {
+            String legacy = p.soPath();
+            spec = legacy == null ? "" : legacy.split("\n")[0].trim();
+        }
         if (!spec.isEmpty()) {
-            for (String part : spec.split("\n")) {
-                String u = part.trim();
-                if (u.isEmpty()) continue;
-                extractSoFromUri(c, u, dir, notes);
-            }
+            extractSoFromUri(c, spec, dir, notes);
         } else if (MultiTts.installed(c)) {
             if (!extractSoFromInstalledApkDirect(c, dir, notes))
-                notes.add("× 读不动安装的 MultiTTS apk（Android 11+ 限制）：请手动选择 so 来源");
+                notes.add("× 读不动安装的 MultiTTS apk（Android 11+ 限制）：请在首页手动选择 MultiTTS apk");
         }
 
         if (new File(dir, "libspeechengine.so").isFile()) {
             notes.add("厂商 so 就绪（files/midu_native，进程内可 dlopen）");
         } else {
             throw new IllegalStateException("缺少 libspeechengine.so：请安装 MultiTTS，"
-                    + "或在「语音源 · 诊断」页选择 so 来源（MultiTTS apk / 内含 lib/arm64-v8a 的 zip / "
-                    + "一个或多个 .so / 文件夹）。icu_shim 等无版权风险的库已随本 APK 内置");
+                    + "或在首页选择 MultiTTS apk（本 app 自动提取 lib/arm64-v8a 里的厂商 so）。"
+                    + "icu_shim 等无版权风险的库已随本 APK 内置");
         }
     }
 
@@ -514,7 +517,7 @@ public final class Provisioner {
                                                  List<String> notes) throws Exception {
         String custom = p.customPath() == null ? "" : p.customPath().trim();
         if (custom.isEmpty())
-            throw new IllegalStateException("未选择语音包：请在「语音源 · 诊断」页"
+            throw new IllegalStateException("未选择语音包：请在首页"
                     + "选择语音包 zip 或解压好的文件夹（MultiTTS 离线包 / rig 语音包都行）");
 
         if (custom.startsWith("content://")) {
@@ -565,7 +568,7 @@ public final class Provisioner {
         boolean sz = ShizukuClient.granted();
         if (mt && sz) return "MultiTTS + Shizuku（自动提取）";
         if (mt) return "MultiTTS（apk 直读 / 手动补充）";
-        return "本地选择 so + 语音包";
+        return "手动选择 MultiTTS apk 提取 so + 语音包";
     }
 
     // -------------------------------------------------------------- 通用件

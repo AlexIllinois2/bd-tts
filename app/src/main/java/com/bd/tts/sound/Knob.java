@@ -28,6 +28,8 @@ public final class Knob {
     public final String[] choices;  // type==STRING 且 choices 非空时渲染成下拉
     public final int evidence;
     public final boolean defaultEnabled;
+    /** 实测无效的参数：仍留在表里（兼容预设 / HTTP 覆盖 / 历史数据），但不在声音页显示。 */
+    public final boolean visible;
 
     private Knob(Builder b) {
         this.key = b.key;
@@ -42,6 +44,7 @@ public final class Knob {
         this.choices = b.choices;
         this.evidence = b.evidence;
         this.defaultEnabled = b.defaultEnabled;
+        this.visible = b.visible;
     }
 
     public boolean isSlider() { return type == EngineOption.INT || type == EngineOption.DOUBLE; }
@@ -70,6 +73,7 @@ public final class Knob {
         String[] choices = null;
         int evidence = STATIC;
         boolean defaultEnabled = false;
+        boolean visible = true;
 
         Builder(String key, String title, String group) {
             this.key = key; this.title = title; this.group = group;
@@ -90,6 +94,8 @@ public final class Knob {
             if (v.length > 0) def = v[0]; return this; }
         public Builder evidence(int v) { evidence = v; defaultEnabled = v != STATIC; return this; }
         public Builder defaultEnabled(boolean v) { defaultEnabled = v; return this; }
+        /** false = 实测无效，从声音页隐藏（表项/预设/HTTP 覆盖仍保留）。 */
+        public Builder visible(boolean v) { visible = v; return this; }
         public Knob build() { return new Knob(this); }
     }
 }

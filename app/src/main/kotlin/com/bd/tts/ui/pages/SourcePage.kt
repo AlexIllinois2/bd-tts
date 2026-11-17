@@ -52,7 +52,9 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
     val ctx = LocalContext.current
     val prefs = remember { Prefs.get(ctx) }
     var customPath by remember(refresh) { mutableStateOf(prefs.customPath()) }
-    var soPath by remember(refresh) { mutableStateOf(prefs.soPath()) }
+    var apkPath by remember(refresh) {
+        mutableStateOf(prefs.multittsApkPath().ifBlank { prefs.soPath().lineSequence().firstOrNull()?.trim() ?: "" })
+    }
     var multitts by remember(refresh) { mutableStateOf(prefs.multittsRoot()) }
     var rigPath by remember(refresh) { mutableStateOf(prefs.host2Rig()) }
     var backend by remember(refresh) { mutableStateOf(prefs.backend()) }
@@ -97,13 +99,18 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
         Actions.invalidate(ctx)
         toast("已选择语音包 zip / apk，下次合成生效")
     }
-    val soLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
-        soPath = uris.joinToString("\n") { it.toString() }
-        prefs.soPath(soPath)
+    val apkLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            ctx.contentResolver.takePersistableUriPermission(uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) {}
+        apkPath = uri.toString()
+        prefs.multittsApkPath(apkPath)
+        prefs.soPath("")   // 清掉旧版 so 列表，避免和 apk 提取结果重复
         Actions.invalidate(ctx)
-        toast("so 来源已保存（${uris.size} 项），下次合成生效")
+        toast("MultiTTS apk 已保存，合成时本 app 会自动提取 so")
     }
 
     LazyColumn(
@@ -133,22 +140,24 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
                     title = "获取方式",
                     subtitle = when {
                         autoMode -> "全自动：从 MultiTTS apk 提取 so；语音包取 apk 内嵌包或其数据目录"
-                        mtInstalled -> "so 尝试直读 MultiTTS apk，读不动请手动选；语音包请选择 zip 或文件夹"
-                        else -> "手动：选择 so 来源（shim 等无版权风险库已内置）+ 语音包 zip 或文件夹"
+                        mtInstalled -> "so 直读已安装的 MultiTTS apk，读不动请手动选 apk；语音包请选择 zip 或文件夹"
+                        else -> "手动：选择 MultiTTS apk（本 app 自己提取 so）+ 语音包 zip 或文件夹"
                     })
                 if (!autoMode) {
-                    if (!soPath.isBlank()) {
-                        SettingRow(Icons.Default.Info, "so 来源（手动）",
-                            "${soPath.split("\n").size} 项已选，点击清除",
+                    if (apkPath.isNotBlank()) {
+                        SettingRow(Icons.Default.Info, "MultiTTS apk（手动）",
+                            "已选：${apkPath.substringAfterLast('/').substringBefore('?')} · 点击清除",
                             onClick = {
-                                soPath = ""; prefs.soPath(""); Actions.invalidate(ctx)
-                                toast("已清除 so 来源")
+                                apkPath = ""; prefs.multittsApkPath(""); prefs.soPath("")
+                                Actions.invalidate(ctx)
+                                toast("已清除 MultiTTS apk")
                             })
                     }
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        ActionButton("选 so 来源", Icons.Default.Edit,
-                            { soLauncher.launch(arrayOf("*/*")) }, Modifier.weight(1f))
+                        ActionButton("选 MultiTTS apk", Icons.Default.Edit,
+                            { apkLauncher.launch(arrayOf("application/vnd.android.package-archive", "*/*")) },
+                            Modifier.weight(1f))
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),

@@ -76,9 +76,16 @@ import java.util.Locale
  * 额外补上 app 内才有的能力：查找已有读音回填、快捷示例、应用后直接试听。
  */
 @Composable
-fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
+fun PronunciationPage(
+    refresh: Int, toast: (String) -> Unit,
+    targetId: String? = null, targetName: String? = null,
+    onClose: (() -> Unit)? = null
+) {
     val ctx = LocalContext.current
     val focus = remember { FocusRequester() }
+    // targetId != null = 从规则页「表单编辑」弹出来，应用时写进指定规则文件；
+    // 独立入口（老版本）仍写在默认用户规则里。
+    val embedded = onClose != null
 
     // 表单
     var key by rememberSaveable { mutableStateOf("") }
@@ -96,7 +103,7 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
     var testText by rememberSaveable { mutableStateOf("") }
 
     // 状态条 / 反馈
-    var status by remember { mutableStateOf(Actions.ruleStatus(ctx)) }
+    var status by remember { mutableStateOf(Actions.ruleStatus(ctx, targetId)) }
     var baselineMtime by remember { mutableStateOf(0L) }
     var externalNotice by remember { mutableStateOf("") }
     var noticeAt by remember { mutableStateOf(0L) }
@@ -107,7 +114,7 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
 
     /** 首次进入 / 从别的 tab 回来：重新读一次状态并同步基线。 */
     LaunchedEffect(refresh) {
-        val st = Actions.ruleStatus(ctx)
+        val st = Actions.ruleStatus(ctx, targetId)
         status = st
         baselineMtime = st.mtime
         externalNotice = ""
@@ -117,7 +124,7 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
     LaunchedEffect(Unit) {
         while (true) {
             delay(2000)
-            val st = Actions.ruleStatus(ctx)
+            val st = Actions.ruleStatus(ctx, targetId)
             status = st
             val now = System.currentTimeMillis()
             if (baselineMtime != 0L && st.mtime != baselineMtime) {
@@ -180,8 +187,9 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
         if (PronunciationEditor.validate(currentForm()) == null) addRule()
         val lines = pending
         busy = true
-        showHint("正在写入用户规则并合并生效…")
-        Actions.appendPendingRules(ctx, lines) { r ->
+        showHint(if (targetId == null) "正在写入用户规则并合并生效…"
+                 else "正在写入「${targetName ?: "规则文件"}」并合并生效…")
+        Actions.appendPendingRules(ctx, lines, { r ->
             busy = false
             status = r.status
             baselineMtime = r.status.mtime
@@ -191,18 +199,19 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
                 hits = emptyList()
                 showHint(r.message)
                 toast("已应用 ${r.added} 条读音规则并重建引擎")
+                onClose?.invoke()
             } else {
                 showHint(r.message, true)
                 toast(r.message)
             }
-        }
+        }, targetId)
     }
 
     /** 内容区点一行：取回表单重新编辑。 */
     fun editPending(index: Int) {
         val line = pending[index]
         val f = PronunciationEditor.parseLine(line)
-        if (f == null) { showHint("这行无法回填，可在「用户规则文件」里直接改", true); return }
+        if (f == null) { showHint("这行无法回填，可在规则文件里直接改", true); return }
         applyForm(f)
         pending = pending.toMutableList().also { it.removeAt(index) }
         focusTick++
@@ -213,14 +222,14 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
         val w = query.trim()
         if (w.isEmpty()) { showHint("请先填写要查找的字词", true); return }
         busy = true
-        Actions.findRules(ctx, w) { list ->
+        Actions.findRules(ctx, w, { list ->
             busy = false
             hits = list
             showHint(
                 if (list.isEmpty()) "没有找到「$w」相关规则，可直接新增一条"
                 else "找到 ${list.size} 条：点任意一条回填表单，改读音后添加并应用即可覆盖"
             )
-        }
+        }, targetId)
     }
 
     fun doPlay() {
@@ -232,7 +241,7 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
         showHint("正在合成试听：$text")
         Actions.play(ctx, text) { msg ->
             busy = false
-            status = Actions.ruleStatus(ctx)
+            status = Actions.ruleStatus(ctx, targetId)
             showHint(msg, msg.startsWith("播放失败"))
             toast(msg)
         }
@@ -264,8 +273,19 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            SectionLabel("词语读音调整", trailing = { Pill("表单 → 添加 → 应用") })
-            StatusBar(status, externalNotice)
+            if (embedded) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("编辑规则文件：${targetName ?: "规则文件"}",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f))
+                    TextButton(onClick = { onClose?.invoke() }) { Text("返回规则页") }
+                }
+            }
+            SectionLabel(
+                if (targetId == null) "词语读音调整" else "表单编辑 · 应用后追加到该文件",
+                trailing = { Pill("表单 → 添加 → 应用") }
+            )
+            StatusBar(status, externalNotice, targetId != null)
         }
 
         // ------------------------------------------------------------ 规则表单
@@ -555,7 +575,7 @@ fun PronunciationPage(refresh: Int, toast: (String) -> Unit) {
 
 /** 对应工具页的 .planbar：补丁文件状态 + 外部改动高亮。 */
 @Composable
-private fun StatusBar(status: Actions.RuleStatus, notice: String) {
+private fun StatusBar(status: Actions.RuleStatus, notice: String, targetMode: Boolean = false) {
     val changed = notice.isNotEmpty()
     Card(
         Modifier.fillMaxWidth(),
@@ -574,7 +594,7 @@ private fun StatusBar(status: Actions.RuleStatus, notice: String) {
             Column {
                 Text(
                     if (changed) notice
-                    else "用户规则 ${status.lines} 行 / ${status.bytes} 字节 · 最近修改 ${fmtTime(status.mtime)}",
+                    else "${if (targetMode) "目标文件" else "用户规则"} ${status.lines} 行 / ${status.bytes} 字节 · 最近修改 ${fmtTime(status.mtime)}",
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (changed) MaterialTheme.colorScheme.onErrorContainer
                     else MaterialTheme.colorScheme.onSurface

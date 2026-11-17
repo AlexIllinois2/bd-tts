@@ -45,7 +45,8 @@ import com.bd.tts.ui.SwitchRow
 @Composable
 fun SoundPage(refresh: Int, toast: (String) -> Unit) {
     val ctx = LocalContext.current
-    val groups = remember { Knobs.grouped().toList() }
+    // 实测无效的项仍留在 Knobs 表（兼容历史预设 / HTTP 覆盖），但不在界面显示。
+    val groups = remember { Knobs.grouped(false).toList() }
     var profiles by remember(refresh) { mutableStateOf(SoundProfiles.all(ctx).map { it.copy() }) }
     var activeId by remember(refresh) { mutableStateOf(SoundProfiles.active(ctx).id) }
     var profile by remember(refresh) { mutableStateOf(SoundProfiles.active(ctx).copy()) }
