@@ -222,18 +222,8 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
                     ActionButton("添加 .tts 文件", Icons.Default.Add,
                         { picker.launch(arrayOf("*/*")) }, Modifier.weight(1f))
                 }
-                Text(
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
                 if (booksLoading) {
                     Text("加载中…",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
-                } else if (books.isEmpty()) {
-                    Text(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))

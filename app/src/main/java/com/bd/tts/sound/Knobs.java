@@ -159,11 +159,8 @@ public final class Knobs {
                 .evidence(Knob.STATIC).visible(false).build());
 
         // ---- 4) 本地后处理（不发给引擎，app 在 PCM 出口处理）------------------
-        add(Knob.builder(K_STEREO_WIDTH, "立体声展宽", GROUP_LOCALOUT)
+        add(Knob.builder(K_STEREO_WIDTH, "立体声", GROUP_LOCALOUT)
                 .integer(35, 0, 100).unit("%")
-                .desc("0 = 原样单声道。>0 时 app 在本地把引擎单声道 PCM 展宽成假立体声"
-                        + "（Haas 反相侧链）：耳机 / 立体声喇叭听感更开阔，手机单声道扬声器"
-                        + "几乎不受影响。不发给引擎，改完下次合成即生效。")
                 .evidence(Knob.VERIFIED).build());
     }
 

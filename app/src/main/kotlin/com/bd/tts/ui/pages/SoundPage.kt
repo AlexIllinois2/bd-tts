@@ -126,7 +126,7 @@ fun SoundPage(refresh: Int, toast: (String) -> Unit) {
                     )
                     Spacer(Modifier.height(8.dp))
                     ActionButton(
-                        text = if (playing) "合成中…" else "合成并播放",
+                        text = if (playing) "合成中…" else "朗读",
                         icon = Icons.Default.PlayArrow,
                         onClick = {
                             if (!playing) {
