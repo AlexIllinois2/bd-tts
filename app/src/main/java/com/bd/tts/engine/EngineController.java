@@ -29,6 +29,12 @@ public final class EngineController {
     private volatile long lastSynthMs = 0;
     private volatile String lastOptions = "";
     private volatile boolean nativeUsable = true;
+    // 规则内容签名：规则是引擎 init 时读的，签名变了必须重建引擎 / 重启 daemon。
+    // 进程内与 host2 分开记，避免后端切换时误判为「已加载」。
+    private volatile String appliedRuleShaNative = "";
+    private volatile String appliedRuleShaHost2 = "";
+    /** 听书合成期间为 true：规则内容切到「无规则」，发音只靠 .tts 内联注音。 */
+    private volatile boolean bookMode = false;
     // host2 是独立进程，但仍串行执行：它和所有调用方共用同一个 rig 目录。
     // 用独立锁而不是 this，是为了让 invalidate() / status() 不被几十秒的合成堵住。
     private final Object host2Lock = new Object();
@@ -70,6 +76,55 @@ public final class EngineController {
 
     private static final String TAG = "EngineController";
 
+    /** 按当前场景选择规则内容：听书走「无规则」，其余走用户三份规则的合并结果。 */
+    private RuleManager.Report applyRules() throws Exception {
+        return RuleManager.apply(app, bookMode);
+    }
+
+    /**
+     * 进入听书模式：整段朗读期间保持「无规则」，发音完全由 .tts 里的
+     * [[字词|拼音]] 决定。规则内容签名变化时只重建一次引擎，之后连续合成不再重启。
+     */
+    public void enterBookMode() throws Exception {
+        synchronized (host2Lock) {
+            if (bookMode) return;
+            bookMode = true;
+            refreshRulesForMode();
+        }
+    }
+
+    /** 退出听书模式，恢复用户三份规则的合并结果（同样只重建一次引擎）。 */
+    public void exitBookMode() throws Exception {
+        synchronized (host2Lock) {
+            if (!bookMode) return;
+            bookMode = false;
+            refreshRulesForMode();
+        }
+    }
+
+    public boolean inBookMode() { return bookMode; }
+
+    /** 规则内容变了：进程内引擎销毁重建、常驻 daemon 停掉冷启，二者都只认 init 时读的规则。 */
+    private void refreshRulesForMode() throws Exception {
+        RuleManager.Report rep = applyRules();
+        if (!rep.sha.equals(appliedRuleShaNative)) {
+            destroyNative();
+            appliedGeneration = -1;
+            appliedRuleShaNative = rep.sha;
+        }
+        if (!rep.sha.equals(appliedRuleShaHost2)) {
+            Host2Daemon.stop(app);
+            appliedRuleShaHost2 = rep.sha;
+        }
+    }
+
+    /** 听书合成：调用方在整段播放前 enterBookMode()、停止时 exitBookMode()。 */
+    public byte[] synthesizeForBook(String text, SoundProfile profile,
+                                    int ratePercent, int pitchPercent) throws Exception {
+        if (!bookMode) enterBookMode();
+        return synthesize(text, profile, ratePercent, pitchPercent);
+    }
+
     /**
      * 规则应用后的预热（异步，不阻塞 UI）：空闲时立即用新规则重启常驻引擎，
      * 把 ~25s 的模型加载藏进两次朗读之间，下一次朗读零等待。
@@ -82,6 +137,7 @@ public final class EngineController {
             try {
                 synchronized (host2Lock) {
                     Prefs p = Prefs.get(app);
+                    applyRules();   // 按当前场景落盘规则内容（听书期间不会被 prewarm 抢到锁）
                     int gen = p.generation();
                     if (gen <= 0 || p.host2DaemonGeneration() == gen) return;
                     if (Prefs.BACKEND_INPROCESS.equals(p.backend())) return;   // 不用常驻引擎
@@ -113,11 +169,11 @@ public final class EngineController {
     /** 准备进程内引擎：规则生效 → 资源根 → dlopen → init → 冒烟一发。 */
     private synchronized void ensureNative() throws Exception {
         Prefs p = Prefs.get(app);
-        RuleManager.Report rep = RuleManager.apply(app);
+        RuleManager.Report rep = applyRules();
         if (rep.changed) RuleManager.generationAfterChange(app, true);
         int gen = p.generation();
 
-        if (handle != 0 && appliedGeneration == gen) return;
+        if (handle != 0 && appliedGeneration == gen && rep.sha.equals(appliedRuleShaNative)) return;
 
         destroyNative();
         ResourceRoot.Prepare prep = ResourceRoot.prepare(app, p.voice());
@@ -150,6 +206,7 @@ public final class EngineController {
         }
         nativeUsable = true;
         appliedGeneration = gen;
+        appliedRuleShaNative = rep.sha;
         status = "进程内 JNI 就绪 · " + rep.summary() + " · 冒烟 " + pcm.length + " B";
     }
 
@@ -211,6 +268,15 @@ public final class EngineController {
     // 在这几十秒里直接 ANR。只把「操作 native handle」的几步锁住即可。
     private byte[] synthesizeInternal(String text, int speed, int pitch, int volume,
                                       List<EngineOption> options) throws Exception {
+        // 所有合成串行化：规则模式（普通 / 听书无规则）是进程级状态，
+        // 不能让两条路径交错写入引擎规则路径并各建各的引擎。
+        synchronized (host2Lock) {
+            return doSynthesize(text, speed, pitch, volume, options);
+        }
+    }
+
+    private byte[] doSynthesize(String text, int speed, int pitch, int volume,
+                                List<EngineOption> options) throws Exception {
         // 内联拼音 [[词|pin1 yin1]] → SSML phoneme；调用方直接传 <speak> 也放行。
         PinyinInline.Result py = PinyinInline.convert(text);
         if (py.ssml) {
@@ -264,7 +330,13 @@ public final class EngineController {
         if (mode.equals(Prefs.BACKEND_AUTO) || mode.equals(Prefs.BACKEND_HOST2)) {
             try {
                 synchronized (host2Lock) {
-                    RuleManager.apply(app);   // 保证 merged 文件是最新的
+                    RuleManager.Report rep = applyRules();
+                    // 规则内容变了（含切进 / 切出听书无规则）：常驻引擎 init 时读规则，
+                    // 必须停掉让它按新内容冷启；ensureStarted 会用刚落盘的 merged 文件。
+                    if (!rep.sha.equals(appliedRuleShaHost2)) {
+                        Host2Daemon.stop(app);
+                        appliedRuleShaHost2 = rep.sha;
+                    }
                     // 规则代数变了就停掉旧 daemon（规则 init 时读，无法热重载）；
                     // 锁内调用保证不会打断进行中的流式合成，重启落在句界。
                     Host2Daemon.ensureRulesReloaded(app, p.generation());
@@ -319,7 +391,11 @@ public final class EngineController {
         if (host2Path) {
             long t0 = System.currentTimeMillis();
             synchronized (host2Lock) {
-                RuleManager.apply(app);
+                RuleManager.Report rep = applyRules();
+                if (!rep.sha.equals(appliedRuleShaHost2)) {
+                    Host2Daemon.stop(app);
+                    appliedRuleShaHost2 = rep.sha;
+                }
                 // 规则代数变了就停掉旧 daemon（规则 init 时读，无法热重载）；
                 // 锁内调用保证不会打断进行中的流式合成，重启落在句界。
                 Host2Daemon.ensureRulesReloaded(app, prefs.generation());

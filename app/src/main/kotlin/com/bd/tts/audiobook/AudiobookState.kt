@@ -15,6 +15,7 @@ data class PlayerUiState(
     val fraction: Float = 0f,       // 当前行内综合播放比例 0..1 = (句号 + 句内比例) / 句数
     val playing: Boolean = false,
     val preparing: Boolean = false, // 正在合成当前句（host2 首次加载可能要几十秒）
+    val sleepRemainingMs: Long = 0L, // 定时剩余毫秒；0 = 未设定时
     val message: String = ""
 )
 

@@ -129,6 +129,8 @@ class AudiobookService : Service() {
     @Volatile private var queue: ArrayBlockingQueue<ReadyPcm>? = null
     @Volatile private var producer: Thread? = null
     @Volatile private var producerError: String? = null
+    // 停止后不允许 producer 再进入无规则模式（否则模式会残留到别的朗读路径）。
+    @Volatile private var bookModeLeaving = false
     private val seqCounter = AtomicInteger(0)
 
     private var lastSaveMs = 0L
@@ -186,13 +188,14 @@ class AudiobookService : Service() {
     // --------------------------------------------------------------- 播放控制
 
     private fun startBook(id: String, requestedLine: Int, pausedAtStart: Boolean) {
-        val f = TtsBooks.file(this, id)
-        if (f == null) {
-            AudiobookState.update { it.copy(message = "听书文件不存在或已被移除") }
+        val book = TtsBooks.get(this, id)
+        if (book == null) {
+            AudiobookState.update { it.copy(message = "听书文件已从书架移除，请重新添加") }
             return
         }
         bookId = id
         BookPrefs.setLastBook(this, id)
+        bookModeLeaving = false
         val g = gen.incrementAndGet()
         clearPrefetch()
         producerError = null
@@ -211,7 +214,7 @@ class AudiobookService : Service() {
         t.start()
         AudiobookState.update {
             it.copy(
-                bookId = id, bookName = f.nameWithoutExtension,
+                bookId = id, bookName = book.name,
                 line = if (requestedLine < 0) it.line else requestedLine,
                 lineCount = lineCount, sentence = 0, sentenceCount = 0,
                 fraction = 0f,
@@ -306,6 +309,18 @@ class AudiobookService : Service() {
     }
 
     private fun produceIntoQueue(g: Int, id: String, requestedLine: Int) {
+        // 整段朗读期间切到「无规则」：发音只由 .tts 的 [[字词|拼音]] 决定。
+        // 只切换一次，连续合成不会反复重建引擎；停止时再切回用户规则。
+        // 放在 producer 线程：停 daemon 可能要等它退出，别卡住主线程。
+        if (!bookModeLeaving && g == gen.get()) {
+            try { EngineController.get(this).enterBookMode() }
+            catch (t: Throwable) { Log.w(TAG, "进入无规则听书模式失败：${t.message}") }
+        }
+        if (g != gen.get()) {
+            // 进入过程中被停止：刚切的模式要立刻退回，别污染后续朗读。
+            try { EngineController.get(this).exitBookMode() } catch (_: Throwable) {}
+            return
+        }
         val reader = try {
             TtsBooks.open(this, id)
         } catch (t: Throwable) {
@@ -387,8 +402,17 @@ class AudiobookService : Service() {
         }
     }
 
+    /** 退出无规则听书模式：停 daemon 可能要等它退出，放后台线程，不卡 UI。 */
+    private fun leaveBookMode() {
+        bookModeLeaving = true
+        Thread {
+            try { EngineController.get(this).exitBookMode() }
+            catch (t: Throwable) { Log.w(TAG, "退出无规则听书模式失败：${t.message}") }
+        }.apply { isDaemon = true }.start()
+    }
+
     private fun synthesize(text: String): ByteArray =
-        EngineController.get(this).synthesize(
+        EngineController.get(this).synthesizeForBook(
             text.take(MAX_SYNTH_CHARS), SoundProfiles.active(this), 100, 100
         )
 
@@ -559,6 +583,7 @@ class AudiobookService : Service() {
         savePositionIfDue(force = true)
         releaseWakeLock()
         session?.isActive = false
+        leaveBookMode()
         if (clearBook) bookId = ""
         AudiobookState.update {
             it.copy(
@@ -662,6 +687,7 @@ class AudiobookService : Service() {
         worker?.interrupt()
         savePositionIfDue(force = true)
         releaseWakeLock()
+        leaveBookMode()
         try { session?.isActive = false; session?.release() } catch (_: Throwable) {}
         session = null
         super.onDestroy()

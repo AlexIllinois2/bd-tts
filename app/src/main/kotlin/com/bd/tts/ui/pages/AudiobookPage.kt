@@ -15,9 +15,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -49,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -58,6 +59,7 @@ import com.bd.tts.audiobook.AudiobookService
 import com.bd.tts.audiobook.AudiobookState
 import com.bd.tts.audiobook.AudiobookText
 import com.bd.tts.audiobook.BookPrefs
+import com.bd.tts.audiobook.SleepTimer
 import com.bd.tts.audiobook.TtsBook
 import com.bd.tts.audiobook.TtsBookReader
 import com.bd.tts.audiobook.TtsBooks
@@ -96,6 +98,8 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
     var jumpDialog by remember { mutableStateOf(false) }
     var jumpText by remember { mutableStateOf("") }
     var removeId by remember { mutableStateOf<String?>(null) }
+    var timerDialog by remember { mutableStateOf(false) }
+    var timerText by remember { mutableStateOf(BookPrefs.sleepMinutes(ctx).toString()) }
 
     val total = if (state.bookId == selected && state.lineCount > 0) state.lineCount
                 else reader?.lineCount ?: 0
@@ -177,7 +181,7 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
             imported.lastOrNull()?.let { b ->
                 selected = b.id
                 cursor = 0
-                toast("已添加「${b.name}」· ${b.lines} 行")
+                toast("已从原位置添加「${b.name}」· ${b.lines} 行")
             }
         }
     }
@@ -338,11 +342,23 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
                             Icon(Icons.Default.Stop, "停止")
                         }
                     }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         TextButton(onClick = {
                             jumpText = (shownLine + 1).toString()
                             jumpDialog = true
                         }) { Text("跳转") }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = {
+                            timerText = BookPrefs.sleepMinutes(ctx).toString()
+                            timerDialog = true
+                        }) {
+                            Text(if (state.sleepRemainingMs > 0)
+                                "定时 ${SleepTimer.format(state.sleepRemainingMs)}" else "定时")
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                     // 当前句显示放在播放控制区下面：句长不同导致的高度变化
@@ -353,8 +369,11 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
                     val currentSentence = shownSentences.getOrNull(activeSentence).orEmpty()
                     val textScroll = rememberScrollState()
                     LaunchedEffect(shownLine, activeSentence) { textScroll.scrollTo(0) }
+                    // 高度固定为一页（屏幕高度减去页面上下留白），与文本长短无关；
+                    // 内容超出时在区域内滚动，按钮区完全不受影响。
+                    val pageHeight = LocalConfiguration.current.screenHeightDp.dp - 16.dp
                     Box(
-                        Modifier.fillMaxWidth().heightIn(max = 200.dp)
+                        Modifier.fillMaxWidth().height(pageHeight)
                             .verticalScroll(textScroll)
                     ) {
                         when {
@@ -402,13 +421,52 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
         )
     }
 
+    if (timerDialog) {
+        AlertDialog(
+            onDismissRequest = { timerDialog = false },
+            title = { Text("定时停止播放") },
+            text = {
+                Column {
+                    Text("倒计时结束后自动停止播放；时长会记住，下次打开自动填入。",
+                        style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = timerText, onValueChange = { timerText = it },
+                        label = { Text("时长（分钟，1 - 1440）") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = timerText.trim().toIntOrNull()
+                    if (n == null || n < 1 || n > 1440) {
+                        toast("请输入 1 到 1440 之间的分钟数")
+                    } else {
+                        SleepTimer.start(ctx, n)
+                        timerDialog = false
+                        toast("已设定 $n 分钟后停止播放")
+                    }
+                }) { Text("开始") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val wasActive = SleepTimer.remainingMs() > 0
+                    SleepTimer.cancel()
+                    timerDialog = false
+                    if (wasActive) toast("已取消定时")
+                }) { Text(if (SleepTimer.remainingMs() > 0) "取消定时" else "取消") }
+            }
+        )
+    }
+
     val pendingRemove = removeId
     if (pendingRemove != null) {
         val name = books.firstOrNull { it.id == pendingRemove }?.name ?: pendingRemove
         AlertDialog(
             onDismissRequest = { removeId = null },
             title = { Text("删除「$name」？") },
-            text = { Text("会删除书库里的副本和已记忆的播放位置；正在播放这本时会先停止。") },
+            text = { Text("只会从书架移除，不会删除你的原文件；同时清除已记忆的播放位置。正在播放这本时会先停止。") },
             confirmButton = {
                 TextButton(onClick = {
                     val id = pendingRemove
@@ -421,7 +479,7 @@ fun AudiobookPage(refresh: Int, toast: (String) -> Unit) {
                         val loaded = withContext(Dispatchers.IO) { TtsBooks.list(ctx) }
                         books = loaded
                         positions = loaded.associate { it.id to BookPrefs.position(ctx, it.id) }
-                        toast(if (ok) "已删除" else "删除失败，文件可能已不存在")
+                        toast(if (ok) "已从书架移除（原文件保留）" else "移除失败，条目可能已不存在")
                     }
                 }) { Text("删除") }
             },

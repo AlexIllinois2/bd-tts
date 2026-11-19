@@ -6,6 +6,7 @@ import android.content.Context
 object BookPrefs {
     private const val FILE = "bd_audiobook"
     private const val LAST_BOOK = "last_book"
+    private const val SLEEP_MINUTES = "sleep_minutes"
 
     private fun sp(c: Context) =
         c.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -31,5 +32,12 @@ object BookPrefs {
 
     fun clearPosition(c: Context, id: String) {
         sp(c).edit().remove("pos_$id").apply()
+    }
+
+    /** 定时时长（分钟）：记住上次输入，默认 30。 */
+    fun sleepMinutes(c: Context): Int = maxOf(1, sp(c).getInt(SLEEP_MINUTES, 30))
+
+    fun setSleepMinutes(c: Context, minutes: Int) {
+        sp(c).edit().putInt(SLEEP_MINUTES, maxOf(1, minutes)).apply()
     }
 }

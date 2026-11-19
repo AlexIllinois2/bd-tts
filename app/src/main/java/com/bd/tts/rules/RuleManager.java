@@ -76,6 +76,11 @@ public final class RuleManager {
         return true;
     }
 
+    public static final String NO_RULES_SHA = "audiobook-no-rules";
+    /** 听书专用：注释-only 的规则文件，引擎加载后等于没有任何发音规则。 */
+    private static final String NO_RULES_TEXT =
+            "# 听书模式：不使用任何规则文件，发音完全由 .tts 中的 [[字词|拼音]] 决定\n";
+
     public static final class Report {
         public final Rules.Result result;
         public final String sha;
@@ -91,12 +96,20 @@ public final class RuleManager {
         public String summary() {
             if (disabled) return "规则已整体禁用（短路）· 各规则文件开关保持不变";
             return Rules.summary(result) + " · 规则文件 " + sourceCount + " 份"
-                    + "  sha=" + sha.substring(0, 12);
+                    + "  sha=" + sha.substring(0, Math.min(12, sha.length()));
         }
     }
 
     /** 合并「N 份规则文件 + 上游 + vendor」→ 原子写到引擎真正读的路径。 */
     public static synchronized Report apply(Context c) throws Exception {
+        return apply(c, false);
+    }
+
+    /**
+     * noRules=true 时只写一份「无规则」内容到引擎规则路径，**不读取、不改动**用户的
+     * 三份规则文件及其开关；听书用它保证发音只来自 .tts 里的内联注音。
+     */
+    public static synchronized Report apply(Context c, boolean noRules) throws Exception {
         ensureSeed(c);
         Prefs prefs = Prefs.get(c);
         boolean disabled = !prefs.rulesEnabled();
@@ -105,7 +118,11 @@ public final class RuleManager {
         String sha;
         int sourceCount = 0;
 
-        if (disabled) {
+        if (noRules) {
+            r = Rules.mergeOrdered(Collections.<String>emptyList());
+            bytes = NO_RULES_TEXT.getBytes(StandardCharsets.UTF_8);
+            sha = NO_RULES_SHA;
+        } else if (disabled) {
             // 一键短路：不碰任何规则文件自己的 enabled，只把引擎规则写成注释。
             r = Rules.mergeOrdered(Collections.<String>emptyList());
             bytes = "# 发音规则已整体禁用（短路），各规则文件开关保持不变\n"
@@ -127,7 +144,8 @@ public final class RuleManager {
 
         Io.atomicWrite(mergedFile(c), bytes);
         Io.atomicWrite(new File(dir(c), "merge_report.txt"),
-                (disabled ? "规则已整体禁用（短路）" : Rules.summary(r))
+                (noRules ? "听书模式：不使用规则文件（发音只来自 .tts 注音）"
+                        : disabled ? "规则已整体禁用（短路）" : Rules.summary(r))
                         + "\n文件数=" + sourceCount + "\nsha=" + sha + "\n\n"
                         + String.join("\n", r.conflicts) + "\n");
 
