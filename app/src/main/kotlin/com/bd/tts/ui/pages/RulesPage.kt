@@ -141,8 +141,7 @@ fun RulesPage(refresh: Int, toast: (String) -> Unit) {
             GroupCard {
                 SwitchRow(
                     icon = Icons.Default.Settings,
-                    title = "启用发音规则（一键短路）",
-                    subtitle = "关闭后引擎只读空规则；各规则文件自己的开关保持不变。第三方可调 /tts?rules=off|on 覆盖",
+                    title = "启用发音规则",
                     checked = globalOn,
                     onCheckedChange = { on ->
                         Actions.setRulesEnabled(ctx, on) { msg -> toast(msg); refreshAll() }
@@ -153,7 +152,7 @@ fun RulesPage(refresh: Int, toast: (String) -> Unit) {
 
         // ------------------------------------------------------------ 规则文件
         item {
-            SectionLabel("规则文件", trailing = { Pill("${entries.size} 份 · 越上越优先") })
+            SectionLabel("规则文件", trailing = { Pill("${entries.size} 份") })
             GroupCard {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -162,10 +161,6 @@ fun RulesPage(refresh: Int, toast: (String) -> Unit) {
                     ActionButton("添加网络文件", Icons.Default.Share,
                         { networkDialog = true }, Modifier.weight(1f))
                 }
-                Text("支持 txt / 规则文件，数量不限；按住左侧手柄拖动可改优先级，靠上的文件覆盖靠下的同键规则。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
                 if (entries.isEmpty()) {
                     Text("还没有规则文件，点上面按钮添加；旧版「用户规则」会在首次启动时自动进列表。",
                         style = MaterialTheme.typography.bodySmall,
@@ -201,28 +196,13 @@ fun RulesPage(refresh: Int, toast: (String) -> Unit) {
 
         // ------------------------------------------------------------ 合并与更新
         item {
-            SectionLabel("合并与更新")
+            SectionLabel("更新")
             GroupCard {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("检查上游更新", Icons.Default.Refresh, {
+                    ActionButton("检查更新", Icons.Default.Refresh, {
                         Actions.checkUpdate(ctx) { msg -> toast(msg); refreshAll() }
                     }, Modifier.weight(1f))
-                    ActionButton("重新合并", Icons.Default.Settings, {
-                        toast(Actions.applyRules(ctx)); refreshAll()
-                    }, Modifier.weight(1f))
-                }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(modifier = Modifier.weight(1f), onClick = {
-                        viewTitle = "合并后的 unified_rule.txt"; viewBody = Actions.mergedText(ctx)
-                    }) { Text("查看合并结果") }
-                    TextButton(modifier = Modifier.weight(1f), onClick = {
-                        viewTitle = "冲突 / 计数报告"; viewBody = report
-                    }) { Text("查看冲突报告") }
-                    TextButton(modifier = Modifier.weight(1f), onClick = {
-                        toast(Actions.rollback(ctx)); refreshAll()
-                    }) { Text("回滚上游") }
                 }
                 SwitchRow(
                     icon = Icons.Default.Refresh,
@@ -237,7 +217,7 @@ fun RulesPage(refresh: Int, toast: (String) -> Unit) {
                         prefs.intervalHours(it.toIntOrNull()?.coerceAtLeast(1) ?: 6)
                         toast("已保存并重新排程")
                     })
-                EditRow(Icons.Default.Share, "上游 unified_rule.txt URL", ruleUrl, "留空用默认（源站+镜像回退）",
+                EditRow(Icons.Default.Share, "远程文件地址", ruleUrl, "留空用默认（源站+镜像回退）",
                     onCommit = { ruleUrl = it; prefs.ruleUrl(it); toast("已保存") })
             }
         }

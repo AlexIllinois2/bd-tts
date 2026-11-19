@@ -74,12 +74,11 @@ fun SoundPage(refresh: Int, toast: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            SectionLabel("当前预设")
-            GroupCard(title = "系统 TTS 与 Legado 共用这套参数") {
+            SectionLabel("模式")
+            GroupCard() {
                 DropdownRow(
                     icon = Icons.Default.Settings,
                     title = "预设",
-                    subtitle = profile.describe(),
                     options = profiles.map { it.name },
                     selected = profiles.firstOrNull { it.id == activeId }?.name ?: profile.name,
                     onSelect = { name ->
@@ -104,11 +103,11 @@ fun SoundPage(refresh: Int, toast: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(modifier = Modifier.weight(1f), onClick = {
-                        dialogText = SoundProfiles.exportJson(ctx); dialog = "json"
-                    }) { Text("导出 JSON") }
-                    TextButton(modifier = Modifier.weight(1f), onClick = {
                         dialogText = ""; dialog = "import"
-                    }) { Text("导入 JSON") }
+                    }) { Text("导入") }
+                    TextButton(modifier = Modifier.weight(1f), onClick = {
+                        dialogText = SoundProfiles.exportJson(ctx); dialog = "json"
+                    }) { Text("导出") }
                     TextButton(modifier = Modifier.weight(1f), onClick = {
                         SoundProfiles.reset(ctx); select(SoundProfiles.ID_STD); toast("已恢复内置预设")
                     }) { Text("重置") }
@@ -117,7 +116,7 @@ fun SoundPage(refresh: Int, toast: (String) -> Unit) {
         }
 
         item {
-            SectionLabel("试听（用当前预设真实合成）")
+            SectionLabel("试听")
             GroupCard {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     OutlinedTextField(
@@ -168,7 +167,7 @@ fun SoundPage(refresh: Int, toast: (String) -> Unit) {
         AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text(when (dialog) {
-                "add" -> "新建预设"; "rename" -> "重命名"; "json" -> "预设 JSON"; else -> "导入预设 JSON"
+                "add" -> "新建模式"; "rename" -> "重命名"; "json" -> "模式 JSON"; else -> "导入模式 JSON"
             }) },
             text = {
                 OutlinedTextField(value = dialogText, onValueChange = { dialogText = it },

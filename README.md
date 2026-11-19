@@ -14,6 +14,9 @@
 > **Legado 本地 HTTP 朗读引擎**（`/tts` 返回 `audio/wav`，可一键导出 HttpTTS 导入 JSON）。
 > 详见 [`docs/LEGADO_AND_KNOBS.md`](docs/LEGADO_AND_KNOBS.md)。
 >
+> 另有**听书模式**：导入自定义 `.tts` 文本，按行播放、记忆续播、拖动进度、跳到指定行，
+> 状态栏常驻播放控件。格式与用法见 [`docs/AUDIOBOOK_TTS_FORMAT.md`](docs/AUDIOBOOK_TTS_FORMAT.md)。
+>
 > **运行期边界（2026-11-12 真机实测后更新）**：`cronet_shim4` 要靠 `LD_PRELOAD` 才抢得到
 > `Cronet_Engine_StartWithParams`，而 app 进程里只有 `dlopen(RTLD_GLOBAL)`。MuMu（x86_64 +
 > houdini）**和**原生 arm64 真机（Redmi Note 8 Pro）都会在 `initEngineToNative` 里报
@@ -74,7 +77,8 @@ midu-tts/
 │       │   └── util/                        # Prefs / Io / Diagnostics
 │       ├── kotlin/com/bd/tts/
 │       │   ├── ui/                          # Compose M3：Theme / Components / Actions / MainActivity
-│       │   ├── ui/pages/                    # Home / Sound / Rules / 读音 / Legado / Source 六页
+│       │   ├── ui/pages/                    # Home / 听书 / Sound / Rules / 读音 / Legado / Source 页
+│       │   ├── audiobook/                   # 听书：TtsBooks / BookPrefs / AudiobookService / State
 │       │   └── legado/                      # LegadoHttpServer / LegadoHttpService / LegadoImport / WavEncoder / LegadoState
 │       ├── assets/rules/vendor_unified_rule.txt   # 规则种子（纯文本，随工程）
 │       ├── assets/midu/                          # prepare_vendor.py 生成，.gitignore 忽略
@@ -237,8 +241,9 @@ App 设置页（`android.speech.tts.engine.CONFIGURE_ENGINE` 也能从系统设�
 - **拼音数 ≠ 汉字数时引擎会整句近乎静音**，所以任一标签校验不过就只摘掉标记
   按普通文本读；直接传整段 `<speak>` SSML 也原样支持。规则层（§3.1）管持久读音，
   内联拼音管单次合成的临时读音，两者互不影响。
-- App「读音」页内置**听书校正提示词**（一键复制）：连同小说 txt 发给任意 AI，
-  大模型会按上述语法输出修好多音字的听书专用全文，粘回引擎即可直接朗读。
+- App「读音」页提供**注音格式说明与示例提示词**（一键复制）：本 App 不生成注音文本，
+  只消费 `[[字词|pin1 yin1]]` 格式；示例提示词供你发给任意 AI 自行生成文本，
+  生成结果导入「听书」页即可朗读。
 
 ### 3.3）立体声展宽（本地后处理，缓解单声道「干」）
 

@@ -119,7 +119,7 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            SectionLabel("快捷入口")
+            SectionLabel("快捷设置")
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ActionButton("系统 TTS", Icons.Default.Settings,
@@ -130,7 +130,7 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
         }
 
         item {
-            SectionLabel("离线语音位置")
+            SectionLabel("字节引擎与语音包")
             GroupCard {
                 SettingRow(Icons.Default.Info, "MultiTTS",
                     if (mtInstalled) "已安装 · org.nobody.multitts" else "未安装")
@@ -162,19 +162,11 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
                 }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ActionButton("选语音包 zip", Icons.Default.Edit,
+                    ActionButton("选取语音包 zip", Icons.Default.Edit,
                         { zipLauncher.launch(arrayOf("*/*")) }, Modifier.weight(1f))
-                    ActionButton("选语音包文件夹", Icons.Default.Edit,
+                    ActionButton("选取语音包文件夹", Icons.Default.Edit,
                         { treeLauncher.launch(null) }, Modifier.weight(1f))
                 }
-                EditRow(Icons.Default.Edit, "语音包路径（可手填普通路径）", customPath,
-                    "例如 /sdcard/AAA/apk/MultiTTS", onCommit = {
-                        customPath = it; prefs.customPath(it); Actions.invalidate(ctx); toast("已保存")
-                    }, subtitle = "解压好的 midu 资源根、语音包 zip / apk 都行；Shizuku 在场还支持文件夹里放包按需解压")
-                EditRow(Icons.Default.Edit, "MultiTTS midu 根目录", multitts,
-                    Prefs.DEFAULT_MULTITTS_ROOT, onCommit = {
-                        multitts = it; prefs.multittsRoot(it); Actions.invalidate(ctx); toast("已保存")
-                    }, subtitle = "全自动链路的兜底：apk 里没有语音包时直读这里")
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ActionButton("试读 ptl.dat", Icons.Default.PlayArrow, {
@@ -206,10 +198,6 @@ fun SourcePage(refresh: Int, toast: (String) -> Unit) {
                     listOf(Prefs.BACKEND_AUTO, Prefs.BACKEND_INPROCESS, Prefs.BACKEND_HOST2),
                     backend, onSelect = {
                         backend = it; prefs.backend(it); Actions.invalidate(ctx); toast("后端=$it")
-                    })
-                EditRow(Icons.Default.Edit, "host2 rig 路径", rigPath,
-                    Prefs.DEFAULT_HOST2_RIG, onCommit = {
-                        rigPath = it; prefs.host2Rig(it); toast("已保存")
                     })
                 SwitchRow(
                     icon = Icons.Default.Settings,

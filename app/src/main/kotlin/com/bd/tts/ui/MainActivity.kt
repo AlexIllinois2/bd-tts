@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Refresh
@@ -30,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.bd.tts.ui.pages.AudiobookPage
 import com.bd.tts.ui.pages.RulesPage
 import com.bd.tts.ui.pages.SoundPage
 import com.bd.tts.ui.pages.SourcePage
@@ -42,7 +44,9 @@ class MainActivity : ComponentActivity() {
         if (com.bd.tts.util.Prefs.get(this).httpAutoStart()) {
             com.bd.tts.legado.LegadoHttpService.start(this)
         }
-        setContent { BdTheme { AppScaffold() } }
+        // 听书通知栏点进来时直接落到听书页。
+        val initialTab = if (intent?.getStringExtra("tab") == "audiobook") 1 else 0
+        setContent { BdTheme { AppScaffold(initialTab) } }
     }
 }
 
@@ -50,15 +54,16 @@ private data class Tab(val title: String, val short: String, val icon: ImageVect
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppScaffold() {
+private fun AppScaffold(initialTab: Int = 0) {
     val tabs = listOf(
         Tab("首页", "首页", Icons.Default.Home),
-        Tab("声音调校", "声音", Icons.Default.Settings),
-        Tab("发音规则", "规则", Icons.Default.List)
+        Tab("听书", "听书", Icons.Default.Headphones),
+        Tab("声音", "声音", Icons.Default.Settings),
+        Tab("规则", "规则", Icons.Default.List)
     )
     // 原「语音源 · 诊断」页改名首页并置顶；发音页从底部导航移除，
-    // 改为规则页里「表单编辑」的弹窗入口。
-    var tab by remember { mutableIntStateOf(0) }
+    // 改为规则页里「表单编辑」的弹窗入口；听书页排在第二位。
+    var tab by remember { mutableIntStateOf(initialTab) }
     var refresh by remember { mutableIntStateOf(0) }
     val scroll = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val snack = remember { SnackbarHostState() }
@@ -95,7 +100,8 @@ private fun AppScaffold() {
         Box(Modifier.padding(pad)) {
             when (tab) {
                 0 -> SourcePage(refresh, toast)
-                1 -> SoundPage(refresh, toast)
+                1 -> AudiobookPage(refresh, toast)
+                2 -> SoundPage(refresh, toast)
                 else -> RulesPage(refresh, toast)
             }
         }

@@ -39,8 +39,37 @@ public final class PinyinInline {
 
     private PinyinInline() {}
 
+    /**
+     * 剥离截断产生的残标记与残字符，合成前必须过一遍。
+     *
+     * 听书等场景会按字数截断长文本（如单次合成 2000 字上限），截断点很容易落在
+     * {@code [[词|pin1 …]]} 标记内部，留下 {@code [[就是|ji} 这样的残片；
+     * 残片匹配不到 TAG 正则，会被当正文逐字母读出（实测表现为「读着读着飙鸟语」）。
+     * 另外截断也可能把生僻字的 UTF-16 代理对劈成孤立高代理，产生无效字符。
+     * 处理：从最后一个未闭合的 {@code [[} 起整段丢弃；尾部孤立高代理一并去掉。
+     */
+    public static String sanitize(String text) {
+        if (text == null || text.isEmpty()) return text;
+        final int n = text.length();
+        int open = -1;
+        int i = 0;
+        while (i < n) {
+            char c = text.charAt(i);
+            if (c == '[' && i + 1 < n && text.charAt(i + 1) == '[') { open = i; i += 2; }
+            else if (c == ']' && i + 1 < n && text.charAt(i + 1) == ']') { open = -1; i += 2; }
+            else i++;
+        }
+        String out = open >= 0 ? text.substring(0, open) : text;
+        while (!out.isEmpty() && Character.isHighSurrogate(out.charAt(out.length() - 1))) {
+            out = out.substring(0, out.length() - 1);
+        }
+        return out;
+    }
+
     public static Result convert(String text) {
         if (text == null) return new Result("", false);
+        text = sanitize(text);
+        if (text.isEmpty()) return new Result("", false);
         if (text.trim().startsWith("<speak>")) return new Result(text, true);
 
         Matcher m = TAG.matcher(text);

@@ -499,18 +499,26 @@ fun PronunciationPage(
             }
         }
 
-        // ---------------------------------------------- 听书校正提示词（给 AI）
+        // ---------------------------------------------- 注音格式说明 + 示例提示词（仅供参考）
         item {
             var expanded by rememberSaveable { mutableStateOf(false) }
-            SectionLabel("听书校正提示词", trailing = { Pill("复制给 AI") })
+            SectionLabel("注音格式说明与示例提示词", trailing = { Pill("仅供参考") })
             GroupCard {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
-                        "把小说 txt 发给任意 AI 前，先粘贴这段提示词：它会按本引擎的" +
-                                "「[[字词|pin1 yin1]]」内联注音语法，输出修好多音字的听书专用全文，" +
-                                "本引擎可直接朗读（语法错标会被安全忽略照读）。",
+                        "本 App 不生成注音文本，只朗读消费 [[字词|pin1 yin1]] 格式的 .tts。" +
+                                "下面给出格式说明和一段示例提示词，可复制给任意 AI 自行生成文本，" +
+                                "生成后到「听书」页导入即可播放。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "格式：[[字词|pin1 yin1]]，如 [[重|chong2]]逢、[[银行|yin2 hang2]]。" +
+                                "竖线右侧按字逐个给拼音、空格分隔，声调 1~5（5=轻声），ü 可写 v；" +
+                                "词必须是纯汉字（1~24 字）。标错会被安全忽略、按原字朗读。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -525,12 +533,12 @@ fun PronunciationPage(
                             Text(if (expanded) "收起" else "展开全文")
                         }
                         FilledTonalButton(onClick = {
-                            Actions.copy(ctx, "BD TTS 听书校正提示词", AGENT_PROMPT)
-                            toast("提示词已复制，连同 txt 发给 AI 即可")
+                            Actions.copy(ctx, "注音格式示例提示词", AGENT_PROMPT)
+                            toast("示例提示词已复制，可发给 AI 生成后导入听书")
                         }) {
                             Icon(Icons.Default.Check, null, Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("复制完整提示词")
+                            Text("复制示例提示词")
                         }
                     }
                 }
@@ -635,37 +643,23 @@ private fun fmtTime(t: Long): String =
     if (t <= 0L) "—" else SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(t))
 
 /**
- * 听书校正提示词：整段复制给任意 AI（连同小说 txt），让大模型按本引擎的内联注音
- * 语法 [[字词|pin1 yin1]] 输出可直接朗读的校正版全文。语法硬约束与
- * engine/PinyinInline.java 的校验严格一致：词=纯汉字 1~24 字、音节空格分隔
- * 逐字对应、声调 1~5（5=轻声）、ü 可写 v；校验不过的标注会被引擎安全摘除照读，
- * 所以提示词里强调「宁可少标不要错标」。
+ * 注音格式示例提示词（仅供参考，App 本身不生成文本）：可整段复制给任意 AI，
+ * 让它按本引擎的内联注音语法 [[字词|pin1 yin1]] 输出带注音的文本，
+ * 用户再把生成结果导入「听书」页消费。这里只是语法说明与示例，不是本 App 的生成功能。
+ * 语法硬约束与 engine/PinyinInline.java 的校验严格一致：词=纯汉字 1~24 字、音节空格分隔
+ * 逐字对应、声调 1~5（5=轻声）、ü 可写 v；校验不过的标注会被引擎安全摘除照读。
  */
-private const val AGENT_PROMPT = """你是一名听书文本校对助手。我会发给你一个 txt 文本（小说/文章），请把它改成「听书专用注音版」后完整输出。
-
+private const val AGENT_PROMPT = """你是一名听书文本注音助手。我会发给你几段小说内容，请把它改成「听书专用注音版」后完整输出。
 ## 目标
-把朗读引擎（BD 离线 TTS）容易读错的字词，用内联注音语法 [[字词|拼音]] 精确标出；其余内容一字不改。
-
+把文本中所有字词，用内联注音语法 [[字词|拼音]] 精确标出。
 ## 注音语法（硬规则，违反的标注会被引擎静默忽略）
 1. 格式：[[字词|拼音 拼音 …]]——竖线右侧是该词每个字的读音，用空格分隔，逐字对应
 2. 字词必须是纯汉字（1~24 个字，不含标点/字母/空格）；要标的目标中间有标点时，拆开分别标注
 3. 每个音节 = 小写拼音 + 声调数字 1~5（5=轻声），ü 写作 v
 4. 音节个数必须与汉字个数严格相等：单字 [[了|le5]]，双字 [[手指|shou2 zhi3]]，三字 [[大阪府|da4 ban3 fu3]]
-5. 一段话里可以有任意多个标注；不标注英文、数字、标点
-
-## 标注原则（宁可少标，不要错标）
-1. 只标注「引擎可能读错」的字词，不要全文逐词标注。重点排查：
-   - 多音字按上下文定音：地（动词后 de5）、了 le5、着 zhe5、得 de5/dei3、还 hai2（还没）/huan2（归还）、都 dou1（都是）/du1（首都）、长 chang2（长江）/zhang3（长大）、重 zhong4（重要）/chong2（重复）、处 chu3（处理）、弹 tan2（弹琴）/dan4（子弹）、载 zai4（载重）/zai3（记载）、行 hang2（银行）/xing2（行人）
-   - 专名读法：[[大夫|dai4 fu5]]（医生）、[[银行|yin2 hang2]]、[[行长|hang2 zhang3]]、[[户籍|hu4 ji2]]
-   - 常见轻声：[[什么|shen2 me5]]、[[东西|dong1 xi5]]、[[意思|yi4 si5]]、[[打听|da3 ting5]]、[[先生|xian1 sheng5]]
-   - 人名/地名/书名按通行读音标注（如 雪中悍刀行 末字 hang2），拿不准的宁可不标
-2. 同一个词每次出现都要标注（引擎按出现位置逐个覆写），不要只标第一处
-3. 内联注音必须写完整拼音，不使用 *5、none5 这类规则层占位写法
-
+## 标注原则
+1. 全文逐词标注。
+2. 内联注音必须写完整拼音，不使用 *5、none5 这类规则层占位写法
+3. 英文、数字、标点视发音情况可以部分改用中文标注
 ## 输出要求
-- 输出校正后的完整全文：保持原有分段、换行、标点，不增删任何字句，不添加任何解释或前后缀
-- 如果我发的是文件，直接输出全文（或存为「原文件名_听书.txt」交付）
-
-## 示例
-输入：他无奈地用手指点了点她的额头。这家银行的行长还没把借书还回来，大家都说他行。
-输出：他无奈[[地|de5]]用[[手指|shou2 zhi3]]点[[了|le5]]点她的额头。这家[[银行|yin2 hang2]]的[[行长|hang2 zhang3]][[还|hai2]]没把借书[[还|huan2]]回来，[[都|dou1]]说他[[行|xing2]]。"""
+- 输出校正后的完整全文：保持原有分段、换行、标点，可以顺手修一些明显的错字词，不添加任何解释或前后缀"""
