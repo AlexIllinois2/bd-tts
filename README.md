@@ -14,7 +14,7 @@
 > **Legado 本地 HTTP 朗读引擎**（`/tts` 返回 `audio/wav`，可一键导出 HttpTTS 导入 JSON）。
 > 详见 [`docs/LEGADO_AND_KNOBS.md`](docs/LEGADO_AND_KNOBS.md)。
 >
-> 另有**听书模式**：导入自定义 `.tts` 文本，按行播放、记忆续播、拖动进度、跳到指定行，
+> 另有**听书模式**：导入自定义 `.tts` 文本，按行播放、记忆续播、拖动进度、按行号跳转，
 > 状态栏常驻播放控件。格式与用法见 [`docs/AUDIOBOOK_TTS_FORMAT.md`](docs/AUDIOBOOK_TTS_FORMAT.md)。
 >
 > **运行期边界（2026-11-12 真机实测后更新）**：`cronet_shim4` 要靠 `LD_PRELOAD` 才抢得到

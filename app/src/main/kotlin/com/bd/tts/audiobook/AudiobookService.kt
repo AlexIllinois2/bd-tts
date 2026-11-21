@@ -53,7 +53,7 @@ class AudiobookService : Service() {
         const val ACTION_NEXT = "com.bd.tts.audiobook.NEXT"
         const val ACTION_SEEK = "com.bd.tts.audiobook.SEEK"
         const val EXTRA_BOOK = "book"
-        const val EXTRA_LINE = "line"
+        const val EXTRA_LINE = "line"          // 0 基行号；-1 = 按记忆续播
 
         private const val CHANNEL_ID = "bd_audiobook"
         private const val NOTIF_ID = 2001
@@ -86,6 +86,8 @@ class AudiobookService : Service() {
         fun stop(c: Context) = control(c, ACTION_STOP)
         fun prev(c: Context) = control(c, ACTION_PREV)
         fun next(c: Context) = control(c, ACTION_NEXT)
+
+        /** 按 0 基行号跳转。 */
         fun seek(c: Context, line: Int) {
             start(c, Intent(c, AudiobookService::class.java).setAction(ACTION_SEEK)
                 .putExtra(EXTRA_LINE, line))
@@ -103,21 +105,28 @@ class AudiobookService : Service() {
     @Volatile private var worker: Thread? = null
     @Volatile private var paused = false
     @Volatile private var bookId = ""
-    @Volatile private var lineIndex = 0
-    @Volatile private var lineCount = 0
+    @Volatile private var lineIndex = 0        // 当前朗读行的 0 基行号
+    @Volatile private var lineCount = 0        // 全书总行数
+    @Volatile private var byteOffset = 0L      // 当前朗读行的行首字节偏移（定位用）
+    @Volatile private var fileSize = 0L        // 文件总字节数
+    @Volatile private var currentReader: TtsBookReader? = null
+    private var lastPublishedLine = -1L        // worker 已发布显示文本的行首，避免同行重复更新
 
     /**
-     * 一个朗读片段：行号 + 行内句号 + 句内片段号 + 全局序号。
+     * 一个朗读片段：行号 + 行首字节偏移 + 行内句号 + 句内片段号 + 全局序号。
      * seq 单调递增，是队列元素与代数的匹配令牌，跳行后旧 seq 一律作废。
      */
     private data class PlayUnit(
         val seq: Long,
-        val line: Int,
+        val line: Int,            // 0 基行号
+        val lineStart: Long,      // 行首字节偏移
         val sentence: Int,
         val chunk: Int,
         val sentenceCount: Int,
         val chunkCount: Int,
-        val text: String
+        val text: String,
+        val lineByteLength: Long, // 本行字节数，供计算全书进度
+        val lineText: String      // 本行显示文本（去注音），worker 播放时发布给 UI
     )
 
     /** 已合成好的片段；带代数 + seq + 文本三重校验，跳行/停止后整队作废。 */
@@ -198,6 +207,7 @@ class AudiobookService : Service() {
         bookModeLeaving = false
         val g = gen.incrementAndGet()
         clearPrefetch()
+        lastPublishedLine = -1L
         producerError = null
         synchronized(lock) { paused = pausedAtStart; lock.notifyAll() }
         worker?.interrupt()
@@ -216,8 +226,9 @@ class AudiobookService : Service() {
             it.copy(
                 bookId = id, bookName = book.name,
                 line = if (requestedLine < 0) it.line else requestedLine,
-                lineCount = lineCount, sentence = 0, sentenceCount = 0,
-                fraction = 0f,
+                lineCount = book.lines,
+                sizeBytes = book.bytes, sentence = 0, sentenceCount = 0,
+                fraction = 0f, lineText = "",
                 playing = !pausedAtStart, preparing = !pausedAtStart, message = ""
             )
         }
@@ -225,31 +236,52 @@ class AudiobookService : Service() {
         if (!pausedAtStart) acquireWakeLock()
     }
 
-    /** 取某一行的句子列表（原文、去空）。整行只读当前行，切句后每句单独限长交给引擎。 */
-    private fun sentencesOf(reader: TtsBookReader, line: Int): List<String> {
-        val raw = reader.textAt(line).trim()
-        if (raw.isEmpty() || raw.startsWith("#")) return emptyList()
-        return AudiobookText.sentences(raw)
-    }
-
     /**
      * 朗读游标：按「行 → 句 → 片段」顺序推进，自动跳过空行 / 注释行。
-     * 只由 producer 线程使用，因此无需同步。null 表示读完全书。
+     * 起始行号经 TtsNative 换成字节偏移后，后续只读当前行、顺序前进；
+     * 因此内网盘上一百 MB 的书也只承载一小段文本。只由 producer 线程使用，无需同步。
      */
     private class BookCursor(
         private val service: AudiobookService,
         private val reader: TtsBookReader,
-        private val total: Int,
         startLine: Int
     ) {
-        private var line = startLine.coerceIn(0, maxOf(0, total - 1))
-        private var sentences: List<String> = service.sentencesOf(reader, line)
+        private var line = startLine.coerceAtLeast(0)  // 下一个要读的物理行号（0 基）
+        // 行号 → 行首偏移由 C/JNI 现算；越界（/-1）则直接走到 EOF。
+        private var cursor = TtsBooks.lineOffset(reader, line).let { off ->
+            if (off >= 0) off else reader.fileSize
+        }
+        private var current: LineRead? = null
+        private var currentLine = 0
+        private var sentences: List<String> = emptyList()
         private var sentence = 0
-        private var chunks: List<String> = if (sentences.isEmpty()) emptyList()
-            else AudiobookText.chunks(sentences[0])
+        private var chunks: List<String> = emptyList()
         private var chunk = 0
+        private var currentDisplay = ""   // 当前行去注音显示文本
 
-        val currentLine: Int get() = line
+        init {
+            advanceToReadableLine()
+        }
+
+        /** 顺序读行直到遇到可朗读行；null 表示读完。空行 / 注释行也占行号。 */
+        private fun advanceToReadableLine(): Boolean {
+            while (true) {
+                val lr = reader.readLineAt(cursor) ?: return false
+                cursor = lr.next
+                val thisLine = line
+                line++
+                val raw = lr.text.trim()
+                if (raw.isEmpty() || raw.startsWith("#")) continue
+                current = lr
+                currentLine = thisLine
+                currentDisplay = AudiobookText.display(lr.text, 20000)
+                sentences = AudiobookText.sentences(lr.text)
+                sentence = 0
+                chunks = if (sentences.isEmpty()) emptyList() else AudiobookText.chunks(sentences[0])
+                chunk = 0
+                return true
+            }
+        }
 
         fun next(): PlayUnit? {
             while (true) {
@@ -260,10 +292,11 @@ class AudiobookService : Service() {
                     // 还白耗一次合成往返——直接跳过。tidy 已合并 ≤2 字碎片，这里兜底更长的情况。
                     if (text.none { it.isLetterOrDigit() }) continue
                     val seq = service.seqCounter.getAndIncrement().toLong()
-                    val u = PlayUnit(
-                        seq, line, sentence, chunk - 1, sentences.size, chunks.size, text
+                    val lr = current ?: return null
+                    return PlayUnit(
+                        seq, currentLine, lr.start, sentence, chunk - 1,
+                        sentences.size, chunks.size, text, lr.byteLength, currentDisplay
                     )
-                    return u
                 }
                 // 本句片段读完 → 下一句
                 sentence++
@@ -273,20 +306,19 @@ class AudiobookService : Service() {
                     continue
                 }
                 // 本行读完 → 下一非空行
-                line++
-                if (line >= total) return null
-                sentences = service.sentencesOf(reader, line)
-                sentence = 0
-                chunks = emptyList()
-                chunk = 0
-                if (sentences.isNotEmpty()) chunks = AudiobookText.chunks(sentences[0])
+                if (!advanceToReadableLine()) return null
             }
         }
     }
 
+    /** 把当前行的显示文本发布给 UI（由 worker 在实际播放该行时调用，与声音同步）。 */
+    private fun publishLineText(text: String) {
+        AudiobookState.update { it.copy(lineText = text) }
+    }
+
     /** seq = -1 的哨兵：producer 结束（读完或失败）时入队，唤醒阻塞在 take 的 worker。 */
     private fun endMarker(g: Int) = ReadyPcm(
-        g, PlayUnit(-1L, 0, 0, 0, 0, 0, ""), ByteArray(0)
+        g, PlayUnit(-1L, 0, 0L, 0, 0, 0, 0, "", 0L, ""), ByteArray(0)
     )
 
     /**
@@ -324,26 +356,45 @@ class AudiobookService : Service() {
         val reader = try {
             TtsBooks.open(this, id)
         } catch (t: Throwable) {
-            Log.e(TAG, "建立听书行索引失败", t)
+            Log.e(TAG, "打开听书文件失败", t)
             producerError = "读取失败：${t.message}"
             return
         }
         if (g != gen.get()) return
-        if (reader == null || reader.lineCount == 0) {
-            producerError = "文件里没有可朗读的行"
+        if (reader == null || reader.isEmpty || reader.fileSize <= 0) {
+            producerError = if (reader?.isEmpty == true) "文件是空的" else "无法获取文件大小，不能定位进度"
+            reader?.close()
             return
         }
 
-        val total = reader.lineCount
+        fileSize = reader.fileSize
+        currentReader = reader
+        // 总行数优先取添加后异步统计的结果；尚未统计好则在 producer 线程现数一次
+        // 并写回，保证播放链路的进度分母可靠。这一步只在播放时发生，不拖慢添加。
+        var total = TtsBooks.get(this, id)?.lines ?: -1
+        if (total <= 0) {
+            total = try { TtsNative.countLines(reader.fd) } catch (_: Throwable) { -1 }
+            if (total > 0) TtsBooks.refreshLineCount(this, id, total)
+        }
+        if (total <= 0) {
+            producerError = "文件里没有可朗读的行"
+            reader.close()
+            currentReader = null
+            return
+        }
         lineCount = total
         var start = requestedLine
-        if (start < 0) start = BookPrefs.position(this, id)   // 恒定续播；重听就跳到第 1 行
-        start = start.coerceIn(0, total - 1)
+        if (start < 0) start = BookPrefs.position(this, id)   // 恒定续播；重听跳第 1 行
+        start = start.coerceIn(0, maxOf(0, total - 1))
         lineIndex = start
+        val startOffset = TtsBooks.lineOffset(reader, start)
+        byteOffset = if (startOffset >= 0) startOffset else 0L
         savePositionIfDue(force = true)
-        AudiobookState.update { it.copy(lineCount = total) }
+        AudiobookState.update {
+            it.copy(lineCount = total, line = start, sizeBytes = fileSize, byteOffset = byteOffset)
+        }
 
-        val cursor = BookCursor(this, reader, total, start)
+        val cursor = BookCursor(this, reader, start)
         val q = queue ?: return
         while (g == gen.get() && !Thread.currentThread().isInterrupted) {
             val unit = cursor.next() ?: break
@@ -351,7 +402,7 @@ class AudiobookService : Service() {
                 synthesize(unit.text)
             } catch (t: Throwable) {
                 Log.e(TAG, "第 ${unit.line + 1} 行片段合成失败", t)
-                producerError = "第 ${unit.line + 1} 行合成失败：${t.message}"
+                producerError = "朗读失败：${t.message}"
                 return
             }
             if (g != gen.get()) return
@@ -376,14 +427,18 @@ class AudiobookService : Service() {
             val unit = ready.unit
             if (unit.seq < 0) break   // 结束哨兵：读完或 producer 失败
             lineIndex = unit.line
+            byteOffset = unit.lineStart
             savePositionIfDue()
-            val inLine = (unit.sentence + (unit.chunk + 1).toFloat() / maxOf(1, unit.chunkCount))
-                .toFloat() / maxOf(1, unit.sentenceCount)
+            if (unit.lineStart != lastPublishedLine) {
+                lastPublishedLine = unit.lineStart
+                publishLineText(unit.lineText)
+            }
             AudiobookState.update {
                 it.copy(
-                    line = unit.line, lineCount = lineCount, sentence = unit.sentence,
-                    sentenceCount = unit.sentenceCount,
-                    fraction = inLine.coerceIn(0f, 1f),
+                    line = unit.line, lineCount = lineCount,
+                    byteOffset = unit.lineStart, sizeBytes = fileSize,
+                    sentence = unit.sentence, sentenceCount = unit.sentenceCount,
+                    fraction = calcFraction(unit, 0f),
                     preparing = false, playing = !paused, message = ""
                 )
             }
@@ -415,6 +470,16 @@ class AudiobookService : Service() {
         EngineController.get(this).synthesizeForBook(
             text.take(MAX_SYNTH_CHARS), SoundProfiles.active(this), 100, 100
         )
+
+    /**
+     * 全书行进度 = (行号 + 行内比例) / 总行数。chunkProgress 是本片段已播放比例 0..1。
+     */
+    private fun calcFraction(u: PlayUnit, chunkProgress: Float): Float {
+        val inSentence = (u.chunk + chunkProgress.coerceIn(0f, 1f)) / maxOf(1, u.chunkCount)
+        val inLine = (u.sentence + inSentence) / maxOf(1, u.sentenceCount)
+        val total = if (lineCount > 0) lineCount else 1
+        return ((u.line + inLine).toFloat() / total).coerceIn(0f, 1f)
+    }
 
     private fun clearPrefetch() {
         queue?.clear()
@@ -477,10 +542,8 @@ class AudiobookService : Service() {
                         val now = SystemClock.elapsedRealtime()
                         if (now - lastFractionUiMs >= FRACTION_UI_INTERVAL_MS) {
                             lastFractionUiMs = now
-                            val inSentence = (unit.chunk + off.toFloat() / data.size) /
-                                maxOf(1, unit.chunkCount)
-                            val inLine = (unit.sentence + inSentence) / maxOf(1, unit.sentenceCount)
-                            AudiobookState.update { it.copy(fraction = inLine.coerceIn(0f, 1f)) }
+                            val chunkProgress = off.toFloat() / maxOf(1, data.size)
+                            AudiobookState.update { it.copy(fraction = calcFraction(unit, chunkProgress)) }
                         }
                     }
                     n == 0 -> if (!sleepShort(10)) { ok = false; break }
@@ -499,11 +562,7 @@ class AudiobookService : Service() {
                     track.play()
                 } else if (!sleepShort(30)) { ok = false; break }
             }
-            if (ok) AudiobookState.update {
-                val done = (unit.sentence + (unit.chunk + 1).toFloat() / maxOf(1, unit.chunkCount)) /
-                    maxOf(1, unit.sentenceCount)
-                it.copy(fraction = done.coerceIn(0f, 1f))
-            }
+            if (ok) AudiobookState.update { it.copy(fraction = calcFraction(unit, 1f)) }
         } catch (t: Throwable) {
             Log.e(TAG, "播放失败", t)
             AudiobookState.update { it.copy(message = "播放失败：${t.message}") }
@@ -556,10 +615,7 @@ class AudiobookService : Service() {
     private fun seekTo(line: Int) {
         val id = bookId
         if (id.isBlank()) {
-            val total = AudiobookState.ui.value.lineCount
-            AudiobookState.update {
-                it.copy(line = line.coerceIn(0, maxOf(0, total - 1)), fraction = 0f)
-            }
+            AudiobookState.update { it.copy(line = line.coerceAtLeast(0), fraction = 0f) }
             return
         }
         val target = line.coerceIn(0, maxOf(0, lineCount - 1))
@@ -584,11 +640,12 @@ class AudiobookService : Service() {
         releaseWakeLock()
         session?.isActive = false
         leaveBookMode()
+        currentReader = null
         if (clearBook) bookId = ""
         AudiobookState.update {
             it.copy(
                 bookId = if (clearBook) "" else it.bookId,
-                playing = false, preparing = false,
+                playing = false, preparing = false, lineText = "",
                 fraction = if (message == "播放完毕") 1f else 0f,
                 message = message
             )
@@ -688,6 +745,7 @@ class AudiobookService : Service() {
         savePositionIfDue(force = true)
         releaseWakeLock()
         leaveBookMode()
+        currentReader = null
         try { session?.isActive = false; session?.release() } catch (_: Throwable) {}
         session = null
         super.onDestroy()

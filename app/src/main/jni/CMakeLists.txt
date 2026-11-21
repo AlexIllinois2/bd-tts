@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(midu_bridge C)
 
-# midu_bridge.c : 真正的 JNI 层（ART 侧，使用 NDK 的 jni.h）
+# midu_bridge.c : 真正的 JNI 层（ART 侧，使用 NDK 的 jni.h）—— 引擎桥接
+# tts_lines.c   : 听书行数 / 行号↔字节偏移（同样用真 jni.h，纯 fd 线性扫描）
 # fake_jni.c    : host2 那套「假 JNIEnv」模型（只吃 jni_local.h，绝不 include jni.h）
-# 两个 TU 分开编译，避免两套 JNI 类型定义冲突。
+# 前两个 TU 与 fake_jni.c 分开编译，避免两套 JNI 类型定义冲突。
 add_library(midu_bridge SHARED
         midu_bridge.c
+        tts_lines.c
         fake_jni.c)
 
 target_include_directories(midu_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
